@@ -1,0 +1,30 @@
+From 1d92f3b2d19020d39758d90d82b4896692247b9c Mon Sep 17 00:00:00 2001
+From: qbtOS maintainers <maintainers@qbtos.invalid>
+Date: Sat, 1 Aug 2026 20:20:00 -0400
+Subject: [PATCH] http: include container headers for Qt 6.8+
+
+Recent Qt versions no longer provide the complete QHash and QMap types
+through the headers included indirectly by this file.
+
+Upstream: N/A, qBittorrent 4.6.7 compatibility with Qt 6.9
+Signed-off-by: qbtOS maintainers <maintainers@qbtos.invalid>
+---
+ src/base/http/types.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/base/http/types.h b/src/base/http/types.h
+index 96364f72b..e0b5e51f3 100644
+--- a/src/base/http/types.h
++++ b/src/base/http/types.h
+@@ -29,7 +29,9 @@
+ 
+ #pragma once
+ 
++#include <QHash>
+ #include <QHostAddress>
++#include <QMap>
+ #include <QString>
+ #include <QVector>
+ 
+-- 
+2.50.1

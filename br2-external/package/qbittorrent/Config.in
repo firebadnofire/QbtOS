@@ -1,0 +1,25 @@
+config BR2_PACKAGE_QBITTORRENT
+	bool "qBittorrent-nox"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_USE_WCHAR
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_BOOST
+	select BR2_PACKAGE_BOOST_SYSTEM
+	select BR2_PACKAGE_LIBTORRENT_RASTERBAR
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_QT6
+	select BR2_PACKAGE_QT6BASE
+	select BR2_PACKAGE_QT6BASE_NETWORK
+	select BR2_PACKAGE_QT6BASE_SQL
+	select BR2_PACKAGE_QT6BASE_XML
+	select BR2_PACKAGE_QT6TOOLS
+	select BR2_PACKAGE_HOST_QT6TOOLS_LINGUIST_TOOLS
+	select BR2_PACKAGE_ZLIB
+	help
+	  Build the headless qBittorrent client with its standard Web
+	  interface.
+
+comment "qBittorrent needs a toolchain w/ C++, threads, wchar, dynamic library"
+	depends on !BR2_INSTALL_LIBSTDCPP || !BR2_TOOLCHAIN_HAS_THREADS || \
+		!BR2_USE_WCHAR || BR2_STATIC_LIBS

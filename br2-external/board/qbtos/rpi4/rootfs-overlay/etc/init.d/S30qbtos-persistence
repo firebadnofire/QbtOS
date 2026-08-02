@@ -1,0 +1,27 @@
+#!/bin/sh
+
+case "$1" in
+	start)
+		printf '%s\n' 'Mounting qbtOS persistent configuration...'
+		mkdir -p /config /data
+		if ! mountpoint -q /config; then
+			mount -L QBTOS_CONFIG /config || exit 1
+		fi
+		install -d -m 0700 /config/qbtos /config/qbtos/tls \
+			/config/qbtos/vpn /config/qbtos/state
+		install -d -o qbtos-qbt -g qbtos-qbt -m 0700 \
+			/config/qbtos/qbittorrent
+		if ! mountpoint -q /data; then
+			mount -o noatime -L QBTOS_DATA /data 2>/dev/null || \
+				printf '%s\n' 'qbtOS: unable to mount QBTOS_DATA' >&2
+		fi
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

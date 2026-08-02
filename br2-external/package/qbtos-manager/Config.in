@@ -1,0 +1,17 @@
+config BR2_PACKAGE_QBTOS_MANAGER
+	bool "qbtOS management service"
+	depends on BR2_USE_MMU
+	depends on BR2_USE_WCHAR
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_IPROUTE2
+	select BR2_PACKAGE_LIBOPENSSL_BIN
+	select BR2_PACKAGE_NFTABLES
+	select BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON3_SSL
+	help
+	  HTTPS setup, status, and fixed-operation control service for
+	  qbtOS.
+
+comment "qbtOS manager needs a toolchain w/ threads, wchar, dynamic library"
+	depends on !BR2_USE_WCHAR || !BR2_TOOLCHAIN_HAS_THREADS || BR2_STATIC_LIBS

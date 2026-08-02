@@ -1,0 +1,30 @@
+# Buildroot output and caches
+/output/
+/dl/
+/.build-log*
+
+# Generated images, compiler products, and test caches
+*.img
+*.iso
+*.o
+*.a
+*.so
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime state and secrets
+/runtime/
+*.key
+*.pem
+*.crt
+*.ovpn
+wg*.conf
+credentials
+
+# Editors and local tooling
+.idea/
+.vscode/
+*.swp
+*~
+

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>qbtOS setup</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.45 system-ui, sans-serif; }
+    body { margin: 0; background: #10151b; color: #e8edf2; }
+    main { max-width: 780px; margin: auto; padding: 2rem 1rem 4rem; }
+    section { background: #19222c; border: 1px solid #344454; border-radius: 10px; padding: 1.2rem; margin: 1rem 0; }
+    h1, h2 { margin-top: 0; }
+    label { display: block; margin: .8rem 0 .25rem; font-weight: 650; }
+    input, select, textarea, button { box-sizing: border-box; width: 100%; padding: .65rem; border-radius: 6px; border: 1px solid #53677b; background: #0f151b; color: inherit; }
+    textarea { min-height: 12rem; font: .85rem ui-monospace, monospace; }
+    button { width: auto; cursor: pointer; margin: .7rem .5rem 0 0; background: #1565c0; border-color: #2f7fd9; font-weight: 700; }
+    button.secondary { background: #354657; }
+    .warning { border-left: 5px solid #e2a72e; padding-left: 1rem; }
+    .good { color: #72d59a; } .bad { color: #ff8b82; }
+    #message { white-space: pre-wrap; }
+    dt { font-weight: 700; } dd { margin: 0 0 .5rem; }
+    a { color: #77b7ff; }
+  </style>
+</head>
+<body><main>
+  <h1>qbtOS development setup</h1>
+  <p class="warning"><strong>The certificate warning is expected.</strong> This development image creates a unique self-signed certificate locally. Confirm that you intentionally opened this device before accepting it. Always use <code>https://</code>; plaintext HTTP is not served on port 8080.</p>
+
+  <section>
+    <h2>System status</h2>
+    <dl id="status"><dt>Loading…</dt></dl>
+    <p><a id="qbt-link" href="#" hidden>Open the qBittorrent Web UI</a></p>
+    <ul id="diagnostics"></ul>
+  </section>
+
+  <form id="setup">
+    <section>
+      <h2>qBittorrent account</h2>
+      <p>These credentials also protect this management page after installation.</p>
+      <label for="qb_username">Administrator username</label>
+      <input id="qb_username" name="qb_username" autocomplete="username" required minlength="3" maxlength="32" value="admin">
+      <label for="qb_password">Administrator password</label>
+      <input id="qb_password" name="qb_password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+    </section>
+
+    <section>
+      <h2>VPN configuration</h2>
+      <label for="vpn_type">VPN type</label>
+      <select id="vpn_type" name="vpn_type">
+        <option value="wireguard">WireGuard</option>
+        <option value="openvpn">OpenVPN</option>
+      </select>
+      <label for="vpn_file">Load configuration file</label>
+      <input id="vpn_file" type="file" accept=".conf,.ovpn,text/plain">
+      <label for="vpn_config">Configuration</label>
+      <textarea id="vpn_config" name="vpn_config" required spellcheck="false" placeholder="Paste a full-tunnel configuration here"></textarea>
+      <label for="vpn_username">VPN username (OpenVPN, when required)</label>
+      <input id="vpn_username" name="vpn_username" autocomplete="off">
+      <label for="vpn_password">VPN password (OpenVPN, when required)</label>
+      <input id="vpn_password" name="vpn_password" type="password" autocomplete="new-password">
+      <p>For safety, this milestone accepts full-tunnel configurations only. OpenVPN certificates and keys must be inline; command hooks and plugins are rejected.</p>
+    </section>
+
+    <section>
+      <h2>Persistent data</h2>
+      <p>Use a mounted Linux filesystem. An ext4 device labeled <code>QBTOS_DATA</code> is mounted automatically at <code>/data</code>.</p>
+      <label for="data_path">Download data directory</label>
+      <input id="data_path" name="data_path" list="mounts" required value="/data">
+      <datalist id="mounts"></datalist>
+    </section>
+
+    <button type="button" class="secondary" id="test">Test VPN</button>
+    <button type="submit">Complete installation</button>
+    <p id="message" aria-live="polite"></p>
+  </form>
+</main>
+<script>
+  const form = document.querySelector('#setup');
+  const message = document.querySelector('#message');
+  document.querySelector('#vpn_file').addEventListener('change', async event => {
+    const file = event.target.files[0];
+    if (file) document.querySelector('#vpn_config').value = await file.text();
+  });
+  function payload() {
+    return Object.fromEntries(new FormData(form).entries());
+  }
+  async function submit(path) {
+    message.className = '';
+    message.textContent = 'Working… qBittorrent remains stopped until all checks pass.';
+    try {
+      const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload())});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Request failed');
+      message.className = 'good';
+      message.textContent = path.endsWith('complete') ? 'Installation complete. Sign in again when prompted.' : 'VPN route and protection checks passed.';
+      render(result.status);
+    } catch (error) {
+      message.className = 'bad';
+      message.textContent = error.message;
+    }
+  }
+  document.querySelector('#test').addEventListener('click', () => submit('/api/test'));
+  form.addEventListener('submit', event => { event.preventDefault(); submit('/api/complete'); });
+  function render(status) {
+    document.querySelector('#status').innerHTML = `
+      <dt>LAN IPv4</dt><dd>${escapeText(status.lan_ip)}</dd>
+      <dt>VPN protection</dt><dd class="${status.vpn_protected ? 'good' : 'bad'}">${status.vpn_protected ? 'Active' : 'Not active'}</dd>
+      <dt>qBittorrent</dt><dd class="${status.qbittorrent_running ? 'good' : 'bad'}">${status.qbittorrent_running ? 'Running' : 'Stopped'}</dd>
+      <dt>Data path</dt><dd>${escapeText(status.data_path)}</dd>`;
+    document.querySelector('#mounts').innerHTML = status.mounts.filter(m => m.writable).map(m => `<option value="${escapeText(m.path)}">`).join('');
+    document.querySelector('#diagnostics').innerHTML = status.diagnostics.map(item => `<li>${escapeText(item)}</li>`).join('');
+    const link = document.querySelector('#qbt-link');
+    link.href = `http://${location.hostname}:8081`;
+    link.hidden = !status.qbittorrent_running;
+  }
+  function escapeText(value) {
+    const element = document.createElement('span'); element.textContent = String(value); return element.innerHTML;
+  }
+  fetch('/api/status').then(response => response.json()).then(render).catch(() => { message.textContent = 'Unable to read system status.'; });
+</script>
+</body></html>
+

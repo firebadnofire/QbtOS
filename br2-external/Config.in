@@ -1,0 +1,6 @@
+menu "qbtOS packages"
+
+source "$BR2_EXTERNAL_QBTOS_PATH/package/qbittorrent/Config.in"
+source "$BR2_EXTERNAL_QBTOS_PATH/package/qbtos-manager/Config.in"
+
+endmenu

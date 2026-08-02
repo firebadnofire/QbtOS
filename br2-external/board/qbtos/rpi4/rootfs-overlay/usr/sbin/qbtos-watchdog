@@ -1,0 +1,9 @@
+#!/bin/sh
+
+while :; do
+	if test -s /run/qbittorrent.pid && ! /usr/libexec/qbtos-control vpn-check >/dev/null 2>&1; then
+		logger -t qbtos-watchdog 'VPN protection check failed; stopping qBittorrent'
+		/usr/libexec/qbtos-control qbt-stop
+	fi
+	sleep 15
+done

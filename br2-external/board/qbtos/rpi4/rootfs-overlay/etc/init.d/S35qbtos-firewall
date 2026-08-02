@@ -1,0 +1,18 @@
+#!/bin/sh
+
+case "$1" in
+	start|restart)
+		printf '%s\n' 'Applying qbtOS traffic lock...'
+		nft delete table inet qbtos 2>/dev/null || true
+		nft -f /etc/nftables-qbtos.conf
+		;;
+	stop)
+		# The traffic lock is intentionally not removed during normal shutdown.
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables
