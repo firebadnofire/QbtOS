@@ -117,6 +117,8 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("Install build dependencies", workflow)
         self.assertIn("QBTOS_REF_NAME: ${{ forgejo.ref_name }}", workflow)
         self.assertIn("git describe --tags --exact-match HEAD", workflow)
+        self.assertIn("Missing required Forgejo secret", workflow)
+        self.assertIn("for required_secret in RAUC_CERT_PEM RAUC_KEY_PEM CI_KEY", workflow)
         self.assertIn('^revision-[1-9][0-9]*$', workflow)
         self.assertIn('eval "$(./build-scripts/release-version.sh)"', workflow)
         self.assertIn('[[ "$SOURCE_TAG" == "$ref_name" ]]', workflow)

@@ -81,7 +81,13 @@ jobs:
           CI_TRUSTED_PUBLIC_KEYS: ${{ secrets.CI_TRUSTED_PUBLIC_KEYS }}
         run: |
           set -euo pipefail
-          [[ -n "$RAUC_CERT_PEM" && -n "$RAUC_KEY_PEM" && -n "$CI_KEY" ]]
+          for required_secret in RAUC_CERT_PEM RAUC_KEY_PEM CI_KEY; do
+            if [[ -z "${!required_secret:-}" ]]; then
+              printf 'Missing required Forgejo secret: %s\n' "$required_secret" >&2
+              exit 1
+            fi
+          done
+          printf 'Required signing secrets are present (values withheld).\n'
           install -m 0600 /dev/null "$RUNNER_TEMP/rauc-release.crt"
           install -m 0600 /dev/null "$RUNNER_TEMP/rauc-release.key"
           printf '%s\n' "$RAUC_CERT_PEM" > "$RUNNER_TEMP/rauc-release.crt"
