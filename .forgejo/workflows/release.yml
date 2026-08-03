@@ -8,6 +8,10 @@ on:
 jobs:
   release:
     runs-on: [ubuntu-latest]
+    # Forgejo's JavaScript actions (checkout/upload-artifact) require Node.
+    # The ubuntu-latest runner currently launches an ubuntu:24.04 container,
+    # which does not provide it by default.
+    container: node:22-bookworm
     timeout-minutes: 360
     steps:
       - name: Check out tagged source
@@ -15,6 +19,18 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            bc build-essential ca-certificates cpio file flake8 git \
+            gnupg jq libncurses-dev libssl-dev mtools patch perl \
+            python3 python3-magic qemu-utils rsync shellcheck unzip wget \
+            xz-utils zstd
 
       - name: Validate tag and derive release metadata
         id: version

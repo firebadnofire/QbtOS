@@ -113,6 +113,8 @@ class ForgejoWorkflowTests(unittest.TestCase):
     def test_every_revision_tag_triggers_an_exact_validated_release(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('tags:\n      - "revision-*"', workflow)
+        self.assertIn("container: node:22-bookworm", workflow)
+        self.assertIn("Install build dependencies", workflow)
         self.assertIn('^revision-[1-9][0-9]*$', workflow)
         self.assertIn('eval "$(./build-scripts/release-version.sh)"', workflow)
         self.assertIn('[[ "$SOURCE_TAG" == "$ref_name" ]]', workflow)
