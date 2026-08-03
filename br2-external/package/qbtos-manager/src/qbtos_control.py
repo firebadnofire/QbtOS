@@ -19,13 +19,18 @@ QBT_PID = Path("/run/qbittorrent.pid")
 OVPN_PID = Path("/run/openvpn-qbtos.pid")
 RESOLV = Path("/run/resolv.conf")
 RESOLV_BACKUP = Path("/run/resolv.conf.before-vpn")
+LAN_NETWORKS = (
+    "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16",
+    "172.16.0.0/12", "192.168.0.0/16",
+)
 
 
-def run(argv, *, check=True, capture=False):
+def run(argv, *, check=True, capture=False, env=None):
     return subprocess.run(
         argv, check=check, text=True, timeout=30,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+        env=env,
     )
 
 
@@ -56,7 +61,7 @@ def vpn_check(verbose=True):
     try:
         settings = load_settings()
         interface = vpn_interface(settings)
-        run(["/usr/sbin/nft", "list", "table", "inet", "qbtos"], capture=True)
+        run(["/usr/sbin/nft", "list", "table", "ip", "qbtos"], capture=True)
         link = run(["/sbin/ip", "-o", "link", "show", "dev", interface], capture=True)
         if "UP" not in link.stdout:
             raise RuntimeError(f"{interface} is not up")
@@ -97,8 +102,26 @@ def restore_dns():
         RESOLV_BACKUP.unlink()
 
 
+def remove_lan_return_rules():
+    for priority, network in enumerate(LAN_NETWORKS, start=100):
+        run([
+            "/sbin/ip", "-4", "rule", "delete", "priority", str(priority),
+            "to", network, "table", "main",
+        ], check=False)
+
+
+def add_lan_return_rules():
+    remove_lan_return_rules()
+    for priority, network in enumerate(LAN_NETWORKS, start=100):
+        run([
+            "/sbin/ip", "-4", "rule", "add", "priority", str(priority),
+            "to", network, "table", "main",
+        ])
+
+
 def vpn_stop():
     qbt_stop()
+    remove_lan_return_rules()
     run(["/usr/bin/wg-quick", "down", str(WG_CONFIG)], check=False)
     if OVPN_PID.exists():
         run(["/sbin/start-stop-daemon", "-K", "-q", "-p", str(OVPN_PID)], check=False)
@@ -118,6 +141,7 @@ def vpn_start():
         ])
     else:
         raise RuntimeError("VPN type is not configured")
+    add_lan_return_rules()
 
     interface = vpn_interface(settings)
     for _ in range(20):
@@ -145,13 +169,21 @@ def qbt_start():
         "/sbin/start-stop-daemon", "-S", "-q", "-b", "-m",
         "-p", str(QBT_PID), "-c", "qbtos-qbt", "-x", "/usr/bin/qbittorrent-nox",
         "--", "--profile=/config/qbtos/qbittorrent", "--webui-port=8081",
-        "--confirm-legal-notice",
-    ])
+    ], env={**os.environ, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
+    time.sleep(2)
+    if not process_alive(QBT_PID):
+        QBT_PID.unlink(missing_ok=True)
+        raise RuntimeError("qBittorrent exited during startup")
 
 
 def status():
     protected = vpn_check(verbose=False)
     print(json.dumps({"vpn_protected": protected, "qbittorrent_running": process_alive(QBT_PID)}))
+
+
+def reboot_system():
+    qbt_stop()
+    run(["/sbin/reboot"])
 
 
 def main():
@@ -162,11 +194,12 @@ def main():
         "qbt-start": qbt_start,
         "qbt-stop": qbt_stop,
         "status": status,
+        "reboot": reboot_system,
     }
     if len(sys.argv) != 2 or sys.argv[1] not in operations:
         print(
             "usage: qbtos-control "
-            "{vpn-start|vpn-stop|vpn-check|qbt-start|qbt-stop|status}",
+            "{vpn-start|vpn-stop|vpn-check|qbt-start|qbt-stop|status|reboot}",
             file=sys.stderr)
         return 2
     result = operations[sys.argv[1]]()

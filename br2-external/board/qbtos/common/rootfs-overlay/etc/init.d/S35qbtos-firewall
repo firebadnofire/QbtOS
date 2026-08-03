@@ -3,7 +3,7 @@
 case "$1" in
 	start|restart)
 		printf '%s\n' 'Applying qbtOS traffic lock...'
-		nft delete table inet qbtos 2>/dev/null || true
+		nft delete table ip qbtos 2>/dev/null || true
 		nft -f /etc/nftables-qbtos.conf
 		;;
 	stop)

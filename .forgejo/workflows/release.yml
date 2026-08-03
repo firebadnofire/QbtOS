@@ -1,0 +1,151 @@
+name: Signed revision release
+
+on:
+  push:
+    tags:
+      - "revision-*"
+
+jobs:
+  release:
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 360
+    steps:
+      - name: Check out tagged source
+        uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Validate tag and derive release metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref_name="${FORGEJO_REF_NAME:-${GITHUB_REF_NAME:-}}"
+          environment_file="${FORGEJO_ENV:-${GITHUB_ENV:-}}"
+          [[ -n "$environment_file" ]]
+          [[ "$ref_name" =~ ^revision-[1-9][0-9]*$ ]] || {
+            echo "Invalid release tag: $ref_name" >&2
+            exit 1
+          }
+          eval "$(./build-scripts/release-version.sh)"
+          [[ "$SOURCE_TAG" == "$ref_name" ]] || {
+            echo "Pushed tag $ref_name is not the highest revision reachable from HEAD" >&2
+            exit 1
+          }
+          {
+            printf 'BUILD_DATE=%s\n' "$BUILD_DATE"
+            printf 'REVISION=%s\n' "$REVISION"
+            printf 'VERSION=%s\n' "$VERSION"
+            printf 'SOURCE_TAG=%s\n' "$SOURCE_TAG"
+            printf 'COMMIT=%s\n' "$COMMIT"
+          } >> "$environment_file"
+
+      - name: Materialize signing secrets
+        shell: bash
+        env:
+          RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
+          RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+          CI_KEY: ${{ secrets.CI_KEY }}
+          CI_TRUSTED_PUBLIC_KEYS: ${{ secrets.CI_TRUSTED_PUBLIC_KEYS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$RAUC_CERT_PEM" && -n "$RAUC_KEY_PEM" && -n "$CI_KEY" ]]
+          install -m 0600 /dev/null "$RUNNER_TEMP/rauc-release.crt"
+          install -m 0600 /dev/null "$RUNNER_TEMP/rauc-release.key"
+          printf '%s\n' "$RAUC_CERT_PEM" > "$RUNNER_TEMP/rauc-release.crt"
+          printf '%s\n' "$RAUC_KEY_PEM" > "$RUNNER_TEMP/rauc-release.key"
+
+          gnupg_home="$RUNNER_TEMP/qbtos-release-gnupg"
+          install -d -m 0700 "$gnupg_home"
+          printf '%s\n' "$CI_KEY" | GNUPGHOME="$gnupg_home" gpg --batch --import
+          if [[ -n "$CI_TRUSTED_PUBLIC_KEYS" ]]; then
+            printf '%s\n' "$CI_TRUSTED_PUBLIC_KEYS" | \
+              GNUPGHOME="$gnupg_home" gpg --batch --import
+          fi
+          fingerprint="$(GNUPGHOME="$gnupg_home" gpg --batch --with-colons \
+            --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          [[ "$fingerprint" =~ ^[0-9A-Fa-f]{40,64}$ ]]
+          GNUPGHOME="$gnupg_home" gpg --batch --export \
+            > "$RUNNER_TEMP/qbtos-update-signing.gpg"
+          [[ -s "$RUNNER_TEMP/qbtos-update-signing.gpg" ]]
+          {
+            printf 'QBTOS_GNUPGHOME=%s\n' "$gnupg_home"
+            printf 'QBTOS_GPG_FINGERPRINT=%s\n' "$fingerprint"
+            printf 'QBTOS_GPG_KEYRING_FILE=%s\n' \
+              "$RUNNER_TEMP/qbtos-update-signing.gpg"
+          } >> "${FORGEJO_ENV:-${GITHUB_ENV}}"
+
+      - name: Check and build signed release
+        shell: bash
+        run: |
+          set -euo pipefail
+          make check
+          make release \
+            VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" REVISION="$REVISION" \
+            SOURCE_TAG="$SOURCE_TAG" COMMIT="$COMMIT" \
+            RAUC_CERT_FILE="$RUNNER_TEMP/rauc-release.crt" \
+            RAUC_KEY_FILE="$RUNNER_TEMP/rauc-release.key" \
+            QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE"
+
+      - name: Sign and verify release checksums
+        shell: bash
+        env:
+          CI_KEY_PASSPHRASE: ${{ secrets.CI_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CI_KEY_PASSPHRASE" ]]
+          unsigned_checksums="$RUNNER_TEMP/$VERSION.sha256.unsigned"
+          mv "dist/$VERSION.sha256" "$unsigned_checksums"
+          printf '%s\n' "$CI_KEY_PASSPHRASE" | \
+            GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch --yes \
+              --pinentry-mode loopback --passphrase-fd 0 \
+              --local-user "$QBTOS_GPG_FINGERPRINT" --armor --clearsign \
+              --output "dist/$VERSION.sha256" "$unsigned_checksums"
+          rm -f "$unsigned_checksums"
+
+          GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch \
+            --verify "dist/$VERSION.sha256"
+          (
+            cd dist
+            GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch --decrypt \
+              "$VERSION.sha256" | sha256sum -c -
+          )
+          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4 ]]
+
+      - name: Create moving feed document
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_base="${FORGEJO_SERVER_URL%/}/${FORGEJO_REPOSITORY}/releases/download/$SOURCE_TAG"
+          ./build-scripts/release-manifest.py \
+            --version "$VERSION" --build-date "$BUILD_DATE" --revision "$REVISION" \
+            --source-tag "$SOURCE_TAG" --commit "$COMMIT" \
+            --bundle "dist/$VERSION.raucb" --image "dist/$VERSION.img.zst" \
+            --base-url "$release_base" --output output/latest.json
+
+      - name: Publish Forgejo release and moving feed
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./build-scripts/publish-forgejo-release.sh
+
+      - name: Upload release files
+        uses: https://data.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: ${{ env.VERSION }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/rauc-release.crt" "$RUNNER_TEMP/rauc-release.key"
+          rm -f "$RUNNER_TEMP/qbtos-update-signing.gpg"
+          if [[ -n "${QBTOS_GNUPGHOME:-}" && -d "$QBTOS_GNUPGHOME" ]]; then
+            find "$QBTOS_GNUPGHOME" -type f -delete
+            find "$QBTOS_GNUPGHOME" -depth -type d -empty -delete
+          fi

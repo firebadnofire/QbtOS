@@ -2,16 +2,33 @@
 
 ## Image and state
 
-The Raspberry Pi boots firmware, `Image`, and the board DTB from a 64 MiB FAT
-partition. Linux mounts partition 2 directly as a read-only SquashFS root.
-Buildroot's volatile `/run` and `/tmp` paths hold ordinary runtime writes, so a
-whole-root OverlayFS is not needed in this milestone. Partition 3 is a 128 MiB
-ext4 filesystem labeled `QBTOS_CONFIG`, mounted at `/config`.
+The Raspberry Pi firmware loads U-Boot, `Image`, the boot script, and the board
+DTB from a 64 MiB FAT partition. U-Boot selects partition 2 (slot A) or 3 (slot
+B) as a read-only SquashFS root by PARTUUID. Buildroot's volatile `/run` and
+`/tmp` paths hold ordinary runtime writes, so a whole-root OverlayFS is not
+needed. Partition 4 is 512 MiB: a 511 MiB ext4 filesystem labeled
+`QBTOS_STATE`, mounted at `/config`, plus a reserved boot-environment tail.
 
-`/config/qbtos` persists setup state, VPN material, TLS identity, manager
+Early init finds configuration and optional data devices by inspecting block
+metadata for `QBTOS_STATE` (with legacy `QBTOS_CONFIG` compatibility) and the
+exact `QBTOS_DATA` label. This avoids fixed
+device names while remaining compatible with the deliberately small userspace,
+whose mount command cannot resolve labels directly.
+
+`/config/qbtos` is an atomic state-generation symlink. It persists setup state,
+VPN material, TLS identity, manager
 authentication, and the qBittorrent profile/resume database. Torrent data must
 be on a mounted Linux filesystem under `/data`, `/media`, or `/mnt`; an ext4
 filesystem labeled `QBTOS_DATA` is automatically mounted at `/data`.
+
+RAUC installs signed rootfs bundles only to the inactive slot. Two redundant
+raw U-Boot environment records in the reserved tail of the state partition
+record order and remaining boot attempts without overlapping ext4 allocation.
+Local boot-health confirmation marks a pending slot good; exhaustion falls
+back to the previous rootfs. The production image contains public RAUC and
+OpenPGP trust material only. See `UPDATES.md` for the trust layers, state
+migration, and recovery procedure. The shared FAT kernel and U-Boot are not yet
+transactionally updated.
 
 ## Services and network boundary
 
@@ -27,6 +44,11 @@ The development console dedicates the Pi 4 PL011 UART to GPIO 14/15 by disabling
 onboard Bluetooth. Firmware enables the UART, the kernel uses `ttyAMA0` as a
 115200-baud console, and init continuously respawns a getty on that exact port.
 
+Because a Raspberry Pi 4 has no battery-backed real-time clock, early init
+advances an unset clock to the image build epoch before the manager creates its
+self-signed certificate. This is a minimum-valid-time seed, not a replacement
+for future network time synchronization.
+
 qBittorrent is built from source and runs as `qbtos-qbt`. nftables allows that
 UID to answer its port-8081 Web UI on private Ethernet ranges, but rejects its
 other traffic unless it exits `wg0` or `tun0`. The start gate also requires an
@@ -34,15 +56,40 @@ installed marker, firewall table, up VPN interface, external IPv4 route through
 that interface, and a recent WireGuard handshake when applicable. A watchdog
 stops qBittorrent if those checks later fail.
 
-This is a defense-in-depth foundation, not a production anonymity claim.
-IPv6 is disabled in this IPv4-only milestone so it cannot bypass the current
-traffic-lock rules. Network-namespace leak tests, hostile route changes, DNS
-failure modes, power-loss recovery, and real Raspberry Pi boot behavior still
-require hardware validation. Provider scripts/plugins are rejected rather than
-run as root.
+This is a defense-in-depth foundation, not a production anonymity claim. IPv6
+is disabled in this IPv4-only milestone so it cannot bypass the current `ip`
+traffic-lock table. Basic Raspberry Pi boot, UART, DHCP, and HTTPS behavior have
+been observed. The corrected automatic mount/firewall boot path,
+network-namespace leak tests, hostile route changes, DNS failure modes, and
+power-loss recovery still require hardware validation. Provider scripts/plugins
+are rejected rather than run as root.
 
 ## Buildroot deviation
 
-Kernel options are kept as `kernel.fragment` over the Raspberry Pi `bcm2711`
-defconfig instead of checking in a large generated `kernel.config`. The Buildroot
-defconfig remains the reproducible top-level configuration source.
+Shared qbtOS kernel options are kept as a focused fragment over the Raspberry Pi
+`bcm2711` or Buildroot QEMU base configurations instead of checking in another
+large generated configuration. Each Buildroot defconfig remains a reproducible
+top-level configuration source.
+
+The external makefile also selects staged `ncursesw` for U-Boot's host-only
+`xxd`/Vim helper. Buildroot builds only the wide host ncurses library; this
+avoids accidentally linking Gentoo's split system `libncurses`/`libtinfo` and
+does not alter target userspace.
+
+## QEMU targets
+
+amd64 and arm64 QEMU builds use Buildroot's architecture-specific virtio kernel
+configurations plus the same qbtOS filesystem, VPN, and netfilter fragment as
+Raspberry Pi. Each QEMU system QCOW2 contains an MBR-partitioned read-only
+SquashFS system and writable `QBTOS_CONFIG` filesystem. A separate sparse QCOW2
+provides the labeled `QBTOS_DATA` filesystem.
+
+QEMU uses direct kernel boot with `bzImage` on amd64 and `Image` on arm64. These
+development targets retain the single-system-slot layout and do not model the
+Raspberry Pi U-Boot/RAUC rollback path. The
+kernel selects partition 1 by its fixed image-local PARTUUID, so differing
+virtio disk enumeration cannot select the data disk as root. This avoids
+architecture-specific guest firmware while keeping the disk portable between
+QEMU hosts. The launcher supplies `ttyS0` or `ttyAMA0`, virtio block and network
+devices, loopback-only NAT forwards, and independent writable runtime copies so
+build artifacts remain templates.

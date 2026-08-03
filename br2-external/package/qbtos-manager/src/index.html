@@ -67,16 +67,36 @@
       <label for="data_path">Download data directory</label>
       <input id="data_path" name="data_path" list="mounts" required value="/data">
       <datalist id="mounts"></datalist>
+      <label for="update_feed_url">Update feed (optional)</label>
+      <input id="update_feed_url" name="update_feed_url" type="url"
+             placeholder="https://UPDATE-HOST/path/latest.json">
     </section>
 
     <button type="button" class="secondary" id="test">Test VPN</button>
     <button type="submit">Complete installation</button>
     <p id="message" aria-live="polite"></p>
   </form>
+
+  <section>
+    <h2>Signed system updates</h2>
+    <p>Release checksums are verified with the qbtOS OpenPGP key, then RAUC
+       verifies the bundle signature and writes only to the inactive system
+       slot. Installation and reboot are separate, explicit actions.</p>
+    <label for="managed_update_feed_url">HTTPS latest.json feed</label>
+    <input id="managed_update_feed_url" type="url"
+           placeholder="https://UPDATE-HOST/path/latest.json">
+    <button type="button" class="secondary" id="save-feed">Save feed</button>
+    <button type="button" class="secondary" id="check-update">Check</button>
+    <button type="button" class="secondary" id="download-update">Download</button>
+    <button type="button" id="install-update">Install to inactive slot</button>
+    <button type="button" id="reboot-update">Reboot into pending slot</button>
+    <p id="update-message" aria-live="polite"></p>
+  </section>
 </main>
 <script>
   const form = document.querySelector('#setup');
   const message = document.querySelector('#message');
+  const updateMessage = document.querySelector('#update-message');
   document.querySelector('#vpn_file').addEventListener('change', async event => {
     const file = event.target.files[0];
     if (file) document.querySelector('#vpn_config').value = await file.text();
@@ -102,8 +122,19 @@
   document.querySelector('#test').addEventListener('click', () => submit('/api/test'));
   form.addEventListener('submit', event => { event.preventDefault(); submit('/api/complete'); });
   function render(status) {
+    const update = status.update || {};
+    const release = status.release || {};
+    const bootloader = update.bootloader || {};
     document.querySelector('#status').innerHTML = `
       <dt>LAN IPv4</dt><dd>${escapeText(status.lan_ip)}</dd>
+      <dt>System version</dt><dd>${escapeText(release.version || 'unknown')}</dd>
+      <dt>Build date / revision</dt><dd>${escapeText(release.build_date || 'unknown')} / ${escapeText(release.revision ?? 'unknown')}</dd>
+      <dt>Source tag / commit</dt><dd>${escapeText(release.source_tag || 'unknown')} / ${escapeText(release.commit || 'unknown')}</dd>
+      <dt>Compatibility / channel</dt><dd>${escapeText(release.compatible || 'unknown')} / ${escapeText(release.channel || 'unknown')}</dd>
+      <dt>Active / inactive slot</dt><dd>${escapeText(update.active_slot || 'unknown')} / ${escapeText(update.inactive_slot || 'unknown')}</dd>
+      <dt>Available version</dt><dd>${escapeText(update.available_version || 'not checked')}</dd>
+      <dt>Update state</dt><dd>${escapeText(update.phase || 'idle')} (${escapeText(update.progress ?? 0)}%): ${escapeText(update.message || '')}</dd>
+      <dt>Boot order / attempts</dt><dd>${escapeText(bootloader.boot_order || 'unknown')} — A: ${escapeText(bootloader.boot_a_left || 'unknown')}, B: ${escapeText(bootloader.boot_b_left || 'unknown')}</dd>
       <dt>VPN protection</dt><dd class="${status.vpn_protected ? 'good' : 'bad'}">${status.vpn_protected ? 'Active' : 'Not active'}</dd>
       <dt>qBittorrent</dt><dd class="${status.qbittorrent_running ? 'good' : 'bad'}">${status.qbittorrent_running ? 'Running' : 'Stopped'}</dd>
       <dt>Data path</dt><dd>${escapeText(status.data_path)}</dd>`;
@@ -112,11 +143,41 @@
     const link = document.querySelector('#qbt-link');
     link.href = `http://${location.hostname}:8081`;
     link.hidden = !status.qbittorrent_running;
+    const feed = update.feed_url || '';
+    document.querySelector('#managed_update_feed_url').value = feed;
+    if (!document.querySelector('#update_feed_url').value) {
+      document.querySelector('#update_feed_url').value = feed;
+    }
   }
+  async function updateCall(path, includeFeed = false) {
+    updateMessage.className = '';
+    updateMessage.textContent = 'Working…';
+    const body = includeFeed ? {update_feed_url: document.querySelector('#managed_update_feed_url').value} : {};
+    const progressPoll = setInterval(() => {
+      fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
+    }, 1500);
+    try {
+      const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Update request failed');
+      updateMessage.className = 'good';
+      updateMessage.textContent = result.message || 'Update action completed.';
+      if (result.status) render(result.status);
+    } catch (error) {
+      updateMessage.className = 'bad';
+      updateMessage.textContent = error.message;
+    } finally {
+      clearInterval(progressPoll);
+    }
+  }
+  document.querySelector('#save-feed').addEventListener('click', () => updateCall('/api/update/config', true));
+  document.querySelector('#check-update').addEventListener('click', () => updateCall('/api/update/check', true));
+  document.querySelector('#download-update').addEventListener('click', () => updateCall('/api/update/download'));
+  document.querySelector('#install-update').addEventListener('click', () => updateCall('/api/update/install'));
+  document.querySelector('#reboot-update').addEventListener('click', () => updateCall('/api/update/reboot'));
   function escapeText(value) {
     const element = document.createElement('span'); element.textContent = String(value); return element.innerHTML;
   }
   fetch('/api/status').then(response => response.json()).then(render).catch(() => { message.textContent = 'Unable to read system status.'; });
 </script>
 </body></html>
-

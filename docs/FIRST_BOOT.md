@@ -19,6 +19,15 @@ qBittorrent state, and basic diagnostics. Once running, it links to the standard
 qBittorrent Web UI on `http://LAN-IP:8081`. The setup credentials protect both
 interfaces. qBittorrent remains stopped when protection checks fail.
 
+The status page also reports the qbtOS version, active and inactive system
+slots, pending update state, and boot-attempt environment. Do not install an
+update until its OpenPGP checksum and RAUC signature checks both succeed. See
+[UPDATES.md](UPDATES.md) before exercising rollback or serial recovery.
+
+The Pi has no battery-backed clock. qbtOS seeds it with the image build time so
+the initial certificate has a sensible validity period; accurate network time
+synchronization remains future work.
+
 ## HTTPS behavior
 
 The Python TLS server safely provides HTTPS only on port 8080; it cannot detect
@@ -31,8 +40,9 @@ HTTP. A request to `http://LAN-IP:8080` therefore fails rather than redirecting.
 Development images keep the GPIO UART enabled and open at 115200 baud, 8 data
 bits, no parity, one stop bit. `config.txt` contains `enable_uart=1` and
 `dtoverlay=disable-bt`, which dedicates the stable PL011 UART to GPIO 14/15
-instead of onboard Bluetooth. The kernel command line contains
-`console=ttyAMA0,115200n8` and is not quiet. BusyBox init opens its login getty
+instead of onboard Bluetooth. U-Boot appends
+`console=ttyAMA0,115200n8` to the kernel command line and neither stage uses
+quiet boot. BusyBox init opens its login getty
 directly on `ttyAMA0` and respawns it whenever it exits, so the port remains
 available after boot as well as during kernel startup.
 

@@ -1,0 +1,22 @@
+#cloud-config
+
+package_update: true
+package_upgrade: false
+
+users:
+  - name: testuser
+    gecos: qbtOS integration controller
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyg+FDDlAa9+s/ok64x8hJVM9/HOb4FXkbJDj8krYE3 william@server
+
+packages:
+  - ca-certificates
+  - curl
+  - jq
+
+runcmd:
+  - [sh, -c, 'printf "%s\n" ready > /var/tmp/qbtos-controller-ready']

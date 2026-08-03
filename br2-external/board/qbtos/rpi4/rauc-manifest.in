@@ -1,0 +1,11 @@
+[update]
+compatible=qbtos-rpi4
+version=@VERSION@
+description=qbtOS @VERSION@ (@SOURCE_TAG@, @COMMIT@)
+build=@BUILD_DATE@
+
+[bundle]
+format=verity
+
+[image.rootfs]
+filename=rootfs.squashfs

@@ -1,0 +1,16 @@
+#!/bin/sh
+
+case "$1" in
+	start)
+		printf '%s\n' 'Validating qbtOS persistent state schema...'
+		/usr/sbin/qbtos-update-state migrate
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

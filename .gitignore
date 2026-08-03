@@ -20,11 +20,16 @@ __pycache__/
 *.crt
 *.ovpn
 wg*.conf
+/*-wg-*.conf
+/*.torrent
 credentials
+
+# Release output and local signing material
+/dist/
+/keys/
 
 # Editors and local tooling
 .idea/
 .vscode/
 *.swp
 *~
-

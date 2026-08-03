@@ -1,0 +1,72 @@
+#!/bin/sh
+
+find_labeled_device() {
+	requested_label="$1"
+	for block_device in /dev/mmcblk*p* /dev/sd? /dev/sd*[0-9] \
+		/dev/nvme*n*p* /dev/vd? /dev/vd*[0-9]; do
+		test -b "$block_device" || continue
+		if blkid "$block_device" 2>/dev/null | \
+			grep -q "LABEL=\"${requested_label}\""; then
+			printf '%s\n' "$block_device"
+			return 0
+		fi
+	done
+	return 1
+}
+
+link_partuuid_devices() {
+	mkdir -p /dev/disk/by-partuuid
+	for block_device in /dev/mmcblk*p* /dev/sd*[0-9] \
+		/dev/nvme*n*p* /dev/vd*[0-9]; do
+		test -b "$block_device" || continue
+		# BusyBox blkid accepts but ignores util-linux's -s/-o flags. Parse its
+		# quoted output so a full metadata line can never become a symlink name.
+		partuuid="$(blkid "$block_device" 2>/dev/null | \
+			sed -n 's/.* PARTUUID="\([^"]*\)".*/\1/p')"
+		test -n "$partuuid" || continue
+		ln -sf "$block_device" "/dev/disk/by-partuuid/$partuuid"
+	done
+}
+
+case "$1" in
+	start)
+		printf '%s\n' 'Mounting qbtOS persistent configuration...'
+		mkdir -p /boot /config /data
+		link_partuuid_devices
+		if ! mountpoint -q /boot; then
+			if boot_device="$(find_labeled_device QBTOS_BOOT)"; then
+				mount -o ro "$boot_device" /boot || \
+					printf '%s\n' 'qbtOS: unable to mount QBTOS_BOOT' >&2
+			fi
+		fi
+		if ! mountpoint -q /config; then
+			config_device="$(find_labeled_device QBTOS_STATE || \
+				find_labeled_device QBTOS_CONFIG)" || {
+				printf '%s\n' 'qbtOS: persistent state filesystem not found' >&2
+				exit 1
+			}
+			mount -o noatime "$config_device" /config || exit 1
+		fi
+		install -d -m 0700 /config/qbtos /config/qbtos/tls \
+			/config/qbtos/vpn /config/qbtos/state /config/qbtos/updates \
+			/config/qbtos-backups
+		install -d -o qbtos-qbt -g qbtos-qbt -m 0700 \
+			/config/qbtos/qbittorrent
+		if ! mountpoint -q /data; then
+			if data_device="$(find_labeled_device QBTOS_DATA)"; then
+				mount -o noatime "$data_device" /data || \
+					printf '%s\n' 'qbtOS: unable to mount QBTOS_DATA' >&2
+			else
+				printf '%s\n' 'qbtOS: QBTOS_DATA filesystem not found' >&2
+			fi
+		fi
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

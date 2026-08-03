@@ -13,11 +13,13 @@ import os
 import pwd
 import re
 import secrets
-import socket
 import ssl
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+
+import qbtos_update
 
 STATE_ROOT = Path(os.environ.get("QBTOS_STATE_ROOT", "/config/qbtos"))
 SETTINGS = STATE_ROOT / "settings.json"
@@ -41,6 +43,7 @@ OPENVPN_FORBIDDEN = {
 }
 OPENVPN_FILE_DIRECTIVES = {"ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "secret"}
 WG_FORBIDDEN = {"preup", "postup", "predown", "postdown"}
+UPDATE_FEED_DEFAULT = ""
 
 
 class ValidationError(ValueError):
@@ -151,17 +154,36 @@ def validate_wireguard(text):
         if lowered == "dns":
             for server in value.split(","):
                 try:
-                    dns_servers.append(str(ipaddress.ip_address(server.strip())))
+                    address = ipaddress.ip_address(server.strip())
                 except ValueError as error:
                     raise ValidationError("WireGuard DNS entries must be IP addresses") from error
+                if address.version == 4:
+                    dns_servers.append(str(address))
             continue
         if lowered == "table" and value.lower() not in {"auto", "main"}:
             raise ValidationError("WireGuard Table must be auto or main")
+        if lowered == "address":
+            addresses = []
+            for address_text in value.split(","):
+                try:
+                    address = ipaddress.ip_interface(address_text.strip())
+                except ValueError as error:
+                    raise ValidationError(
+                        "WireGuard Address entries must be IP interfaces") from error
+                if address.version == 4:
+                    addresses.append(str(address))
+            if not addresses:
+                raise ValidationError("WireGuard configuration requires an IPv4 Address")
+            value = ", ".join(addresses)
+        if section == "peer" and lowered == "allowedips":
+            if not _full_tunnel(value):
+                raise ValidationError(
+                    "WireGuard AllowedIPs must include 0.0.0.0/0 for fail-closed setup")
+            networks = [ipaddress.ip_network(item.strip(), strict=False)
+                        for item in value.split(",")]
+            value = ", ".join(str(network) for network in networks if network.version == 4)
         if lowered in {"privatekey", "address", "publickey", "endpoint", "allowedips"}:
             found.add((section, lowered))
-        if section == "peer" and lowered == "allowedips" and not _full_tunnel(value):
-            raise ValidationError(
-                "WireGuard AllowedIPs must include 0.0.0.0/0 for fail-closed setup")
         output.append(f"{key} = {value}")
     required = {
         ("interface", "privatekey"), ("interface", "address"),
@@ -242,6 +264,9 @@ def persist_setup(payload):
     vpn_text = payload.get("vpn_config", "")
     vpn_username = payload.get("vpn_username", "")
     vpn_password = payload.get("vpn_password", "")
+    update_feed_url = payload.get("update_feed_url", "").strip()
+    if update_feed_url:
+        qbtos_update.validate_feed_url(update_feed_url)
     if vpn_type == "wireguard":
         normalized, dns_servers = validate_wireguard(vpn_text)
         atomic_write(WG_CONFIG, normalized)
@@ -271,6 +296,7 @@ def persist_setup(payload):
         "vpn_type": vpn_type,
         "vpn_interface": interface,
         "dns_servers": dns_servers,
+        "update_feed_url": update_feed_url,
     }
     atomic_write(SETTINGS, json.dumps(settings, indent=2, sort_keys=True) + "\n")
     return settings, qbittorrent_password_hash(password)
@@ -281,8 +307,15 @@ def write_qbittorrent_config(settings, qbt_password):
     for directory in (data_path, f"{data_path}/downloads", f"{data_path}/incomplete"):
         Path(directory).mkdir(parents=True, exist_ok=True)
     account = pwd.getpwnam("qbtos-qbt")
+    profile_directories = (
+        STATE_ROOT / "qbittorrent",
+        STATE_ROOT / "qbittorrent/qBittorrent",
+        STATE_ROOT / "qbittorrent/qBittorrent/config",
+    )
+    for directory in profile_directories:
+        directory.mkdir(parents=True, exist_ok=True)
     for directory in (
-            STATE_ROOT / "qbittorrent", Path(data_path),
+            *profile_directories, Path(data_path),
             Path(data_path) / "downloads", Path(data_path) / "incomplete"):
         os.chown(directory, account.pw_uid, account.pw_gid)
     interface = settings["vpn_interface"]
@@ -324,6 +357,19 @@ def lan_ip():
     return match.group(1) if match else "unavailable"
 
 
+def wait_for_lan_ip(timeout=60):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        address = lan_ip()
+        try:
+            if not ipaddress.ip_address(address).is_loopback:
+                return address
+        except ValueError:
+            pass
+        time.sleep(1)
+    raise RuntimeError("wired DHCP did not provide a LAN IPv4 address")
+
+
 def mounted_data_paths():
     paths = []
     try:
@@ -357,6 +403,32 @@ def status_payload():
         ("qBittorrent is disabled until setup and protection checks succeed"
          if not INSTALLED.exists() else "Installation settings saved"),
     ]
+    release = qbtos_update.read_release()
+    active = qbtos_update.active_slot()
+    try:
+        inactive = qbtos_update.inactive_slot(active)
+    except qbtos_update.UpdateError:
+        inactive = "unknown"
+    update = qbtos_update.update_status()
+    update.update({
+        "active_slot": active,
+        "inactive_slot": inactive,
+        "current_version": release["version"],
+        "current_revision": release["revision"],
+        "feed_url": settings.get("update_feed_url", UPDATE_FEED_DEFAULT),
+    })
+    try:
+        available = json.loads(
+            (qbtos_update.UPDATE_ROOT / "latest.json").read_text(encoding="utf-8"))
+        update["available_version"] = available.get("version", "unknown")
+        update["available_revision"] = available.get("revision", 0)
+    except (OSError, json.JSONDecodeError):
+        update["available_version"] = "not checked"
+        update["available_revision"] = 0
+    if Path(qbtos_update.RAUC).exists():
+        update["bootloader"] = qbtos_update.bootloader_state()
+    else:
+        update["bootloader"] = {"boot_order": "unsupported"}
     return {
         "installed": INSTALLED.exists(), "lan_ip": lan_ip(),
         "vpn_type": settings.get("vpn_type", "not configured"),
@@ -364,20 +436,67 @@ def status_payload():
         "qbittorrent_running": services.get("qbittorrent_running", False),
         "data_path": settings.get("data_path", "not selected"),
         "mounts": mounted_data_paths(), "diagnostics": diagnostics,
+        "release": release, "update": update,
     }
+
+
+def load_latest_update():
+    try:
+        document = json.loads(
+            (qbtos_update.UPDATE_ROOT / "latest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValidationError("Check the update feed before continuing") from error
+    try:
+        return qbtos_update.validate_feed(document, qbtos_update.read_release())
+    except qbtos_update.UpdateError as error:
+        raise ValidationError(str(error)) from error
+
+
+def update_feed_url(payload):
+    settings = {}
+    try:
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    value = str(payload.get("update_feed_url", settings.get("update_feed_url", ""))).strip()
+    if not value:
+        raise ValidationError("Configure an HTTPS latest.json update feed first")
+    try:
+        return qbtos_update.validate_feed_url(value)
+    except qbtos_update.UpdateError as error:
+        raise ValidationError(str(error)) from error
 
 
 def ensure_tls():
     TLS_KEY.parent.mkdir(parents=True, exist_ok=True)
     if TLS_KEY.exists() and TLS_CERT.exists():
-        return
-    subprocess.run([
-        "/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
-        "-nodes", "-days", "825", "-keyout", str(TLS_KEY), "-out", str(TLS_CERT),
-        "-subj", "/CN=qbtos", "-addext", "subjectAltName=DNS:qbtos",
-    ], timeout=60, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    TLS_KEY.chmod(0o600)
-    TLS_CERT.chmod(0o644)
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(TLS_CERT, TLS_KEY)
+            return
+        except (OSError, ssl.SSLError):
+            pass
+
+    # OpenSSL creates its output files before it has finished writing them.
+    # Generate into a private temporary directory so an interrupted first boot
+    # cannot leave apparently complete certificate paths behind.
+    with tempfile.TemporaryDirectory(prefix=".tls.", dir=TLS_KEY.parent) as temporary:
+        temporary_root = Path(temporary)
+        temporary_key = temporary_root / "manager.key"
+        temporary_cert = temporary_root / "manager.crt"
+        subprocess.run([
+            "/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
+            "-nodes", "-days", "825", "-keyout", str(temporary_key),
+            "-out", str(temporary_cert), "-subj", "/CN=qbtos",
+            "-addext", "subjectAltName=DNS:qbtos",
+        ], timeout=60, check=True, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        temporary_key.chmod(0o600)
+        temporary_cert.chmod(0o644)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(temporary_cert, temporary_key)
+        os.replace(temporary_key, TLS_KEY)
+        os.replace(temporary_cert, TLS_CERT)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -430,6 +549,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(status, json.dumps(value).encode())
 
     def do_GET(self):
+        if self.path == "/api/health":
+            self._json(200, {"ok": True})
+            return
         if not self._require_auth():
             return
         if self.path == "/":
@@ -442,14 +564,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._require_auth():
             return
-        if self.path not in {"/api/test", "/api/complete"}:
+        allowed = {
+            "/api/test", "/api/complete", "/api/update/config",
+            "/api/update/check", "/api/update/download", "/api/update/install",
+            "/api/update/reboot",
+        }
+        if self.path not in allowed:
             self._json(404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > MAX_BODY:
-                raise ValidationError("Request is empty or too large")
-            payload = json.loads(self.rfile.read(length))
+            if length < 0 or length > MAX_BODY:
+                raise ValidationError("Request is too large")
+            payload = json.loads(self.rfile.read(length)) if length else {}
+            if self.path.startswith("/api/update/"):
+                self._handle_update(payload)
+                return
             settings, qbt_password = persist_setup(payload)
             vpn_result = control("vpn-start")
             if vpn_result.returncode != 0:
@@ -461,22 +591,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if qbt_result.returncode != 0:
                     raise ValidationError(qbt_result.stdout.strip() or "qBittorrent did not start")
             self._json(200, {"ok": True, "status": status_payload()})
-        except (ValidationError, json.JSONDecodeError, KeyError, OSError,
+        except (ValidationError, qbtos_update.UpdateError, json.JSONDecodeError, KeyError, OSError,
                 subprocess.SubprocessError) as error:
             control("qbt-stop")
+            if self.path == "/api/complete":
+                INSTALLED.unlink(missing_ok=True)
             self._json(400, {"ok": False, "error": str(error)})
+
+    def _handle_update(self, payload):
+        if self.path == "/api/update/config":
+            url = update_feed_url(payload)
+            try:
+                settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValidationError("Complete appliance setup first") from error
+            settings["update_feed_url"] = url
+            atomic_write(SETTINGS, json.dumps(settings, indent=2, sort_keys=True) + "\n")
+            self._json(200, {"ok": True, "status": status_payload()})
+        elif self.path == "/api/update/check":
+            document = qbtos_update.fetch_feed(update_feed_url(payload))
+            document = qbtos_update.validate_feed(document, qbtos_update.read_release())
+            qbtos_update.write_json(qbtos_update.UPDATE_ROOT / "latest.json", document)
+            qbtos_update.set_update_status(
+                "available", 0, f"Signed update {document['version']} is available",
+                available_version=document["version"])
+            self._json(200, {"ok": True, "status": status_payload()})
+        elif self.path == "/api/update/download":
+            document = load_latest_update()
+            qbtos_update.verify_release_checksums(document)
+            qbtos_update.download_bundle(document)
+            self._json(200, {"ok": True, "status": status_payload()})
+        elif self.path == "/api/update/install":
+            document = load_latest_update()
+            qbtos_update.install_bundle(document)
+            self._json(200, {"ok": True, "status": status_payload()})
+        elif self.path == "/api/update/reboot":
+            if qbtos_update.update_status().get("phase") != "awaiting-reboot":
+                raise ValidationError("No installed update is awaiting reboot")
+            self._json(200, {"ok": True, "message": "Rebooting into the pending slot"})
+            control("reboot")
 
 
 def main():
     if not Path("/config").is_mount():
         raise SystemExit("qbtOS configuration partition is not mounted; refusing ephemeral setup")
     ensure_tls()
+    bind_address = wait_for_lan_ip()
     server = http.server.ThreadingHTTPServer(
-        ("0.0.0.0", 8080), Handler, bind_and_activate=False)
-    server.socket.setsockopt(
-        socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b"eth0\0")
-    server.server_bind()
-    server.server_activate()
+        (bind_address, 8080), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(TLS_CERT, TLS_KEY)

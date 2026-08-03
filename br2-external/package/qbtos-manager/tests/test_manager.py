@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 MODULE_PATH = Path(__file__).parents[1] / "src/qbtos_manager.py"
+sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("qbtos_manager", MODULE_PATH)
 manager = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(manager)
@@ -36,6 +38,23 @@ AllowedIPs = 0.0.0.0/0
 """
         normalized, dns = manager.validate_wireguard(config)
         self.assertNotIn("DNS", normalized)
+        self.assertEqual(dns, ["10.0.0.1"])
+
+    def test_wireguard_dual_stack_profile_is_normalized_to_ipv4(self):
+        config = """[Interface]
+PrivateKey = secret
+Address = 10.0.0.2/32, fd00::2/128
+DNS = 10.0.0.1, fd00::1
+[Peer]
+PublicKey = public
+Endpoint = vpn.example:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+"""
+        normalized, dns = manager.validate_wireguard(config)
+        self.assertIn("Address = 10.0.0.2/32", normalized)
+        self.assertIn("AllowedIPs = 0.0.0.0/0", normalized)
+        self.assertNotIn("fd00::", normalized)
+        self.assertNotIn("::/0", normalized)
         self.assertEqual(dns, ["10.0.0.1"])
 
     def test_wireguard_rejects_command_hooks(self):

@@ -2,23 +2,29 @@
 
 ## Milestone boundary
 
-This milestone targets only Raspberry Pi 4 Model B (64-bit), wired DHCP, a
-read-only SquashFS system, persistent configuration, VPN setup, qBittorrent,
-and a small HTTPS management interface. The broader roadmap remains in
-`VISION.md`.
+This milestone targets Raspberry Pi 4 Model B (64-bit) plus amd64 and arm64
+QEMU development guests, wired DHCP, a read-only SquashFS system, persistent
+configuration, VPN setup, qBittorrent, and a small HTTPS management interface.
+The broader roadmap remains in `VISION.md`.
 
 ## Delivery sequence
 
 1. Pin Buildroot 2026.05.1 and derive `qbtos_rpi4_defconfig` from its supported
    Raspberry Pi 4 64-bit configuration.
-2. Produce a raw MBR SD image containing FAT boot, SquashFS system, and labeled
-   ext4 configuration partitions. Keep runtime writes in tmpfs or `/config`.
+2. Produce a raw MBR SD image containing FAT boot, A/B SquashFS system slots,
+   and a labeled ext4 state partition. Keep runtime writes in tmpfs or `/config`.
 3. Package qBittorrent 4.6.7 from source and install Python standard-library
    management code through the external tree.
 4. Mount persistent state, apply the nftables traffic lock, start the HTTPS
    manager, and leave qBittorrent stopped until setup and VPN route checks pass.
 5. Validate Buildroot metadata and manager tests, build from a clean output
    directory, and inspect the image and target filesystem.
+6. Reuse the appliance userspace for QEMU, generate separate system and data
+   QCOW2 disks, and provide a direct-kernel launcher with loopback-only port
+   forwarding.
+7. Add U-Boot boot selection, RAUC inactive-slot installation, local boot
+   confirmation, atomic state generations, signed release metadata, and a
+   Forgejo revision-tag pipeline.
 
 ## Safety boundary
 
@@ -32,13 +38,16 @@ hardware and against disconnect, route-change, DNS, and reboot scenarios.
 
 ## Current status
 
-The image path, manager tests, Buildroot metadata checks, filesystem contents,
-and raw partition payloads have been validated on a Linux build host. Physical
-Raspberry Pi boot and network leak testing remain open; see `VALIDATION.md`.
+The original image path, manager tests, Buildroot metadata checks, filesystem
+contents, and raw partition payloads were validated on a Linux build host. A
+Raspberry Pi 4 boot, serial login, DHCP, and HTTPS manager response have also
+been confirmed. The new A/B update image still needs host artifact inspection
+and a physical reflash; rollback and VPN leak testing remain open. amd64 and
+arm64 QEMU guests boot to the working HTTPS setup interface; see `VALIDATION.md`.
 
 ## Deferred work
 
 - Automated USB/FAT configuration import and general removable-media mounting
-- Wi-Fi, Raspberry Pi 5, A/B updates, signed releases, and rollback
+- Wi-Fi, Raspberry Pi 5, transactional FAT/kernel updates, and OTA publishing
 - Production PKI, hardened privilege separation, and browser-trusted TLS
 - Provider-specific VPN behavior and exhaustive network-namespace leak tests

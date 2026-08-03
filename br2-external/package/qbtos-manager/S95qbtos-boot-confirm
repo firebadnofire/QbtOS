@@ -1,0 +1,21 @@
+#!/bin/sh
+
+DAEMON="qbtos-boot-confirm"
+PIDFILE="/var/run/$DAEMON.pid"
+
+case "$1" in
+	start)
+		command -v rauc >/dev/null 2>&1 || exit 0
+		printf '%s\n' 'Scheduling qbtOS A/B boot confirmation...'
+		start-stop-daemon -S -q -b -m -p "$PIDFILE" \
+			-x /usr/sbin/qbtos-boot-confirm
+		;;
+	stop)
+		start-stop-daemon -K -q -p "$PIDFILE" || true
+		rm -f "$PIDFILE"
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac

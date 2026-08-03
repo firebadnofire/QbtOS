@@ -1,0 +1,23 @@
+#!/bin/sh
+
+BUILD_EPOCH_FILE="/usr/share/qbtos/build-epoch"
+
+case "$1" in
+	start)
+		test -s "$BUILD_EPOCH_FILE" || exit 0
+		build_epoch="$(cat "$BUILD_EPOCH_FILE")"
+		current_epoch="$(date +%s)"
+		if test "$current_epoch" -lt "$build_epoch"; then
+			printf '%s\n' 'Seeding system clock from qbtOS image build time...'
+			date -u -s "@${build_epoch}" >/dev/null
+		fi
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables
