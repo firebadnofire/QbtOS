@@ -115,6 +115,8 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('tags:\n      - "revision-*"', workflow)
         self.assertIn("container: node:22-bookworm", workflow)
         self.assertIn("Install build dependencies", workflow)
+        self.assertIn("QBTOS_REF_NAME: ${{ forgejo.ref_name }}", workflow)
+        self.assertIn("git describe --tags --exact-match HEAD", workflow)
         self.assertIn('^revision-[1-9][0-9]*$', workflow)
         self.assertIn('eval "$(./build-scripts/release-version.sh)"', workflow)
         self.assertIn('[[ "$SOURCE_TAG" == "$ref_name" ]]', workflow)

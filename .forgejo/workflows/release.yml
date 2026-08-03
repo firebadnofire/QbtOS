@@ -35,11 +35,26 @@ jobs:
       - name: Validate tag and derive release metadata
         id: version
         shell: bash
+        env:
+          # Use the Forgejo context explicitly; older runner builds have not
+          # always exported the compatible GITHUB_REF_NAME alias to shells.
+          QBTOS_REF_NAME: ${{ forgejo.ref_name }}
         run: |
           set -euo pipefail
-          ref_name="${FORGEJO_REF_NAME:-${GITHUB_REF_NAME:-}}"
+          ref_name="${QBTOS_REF_NAME:-${FORGEJO_REF_NAME:-${GITHUB_REF_NAME:-}}}"
+          if [[ -z "$ref_name" ]]; then
+            event_ref="${FORGEJO_REF:-${GITHUB_REF:-}}"
+            ref_name="${event_ref##*/}"
+          fi
+          if [[ -z "$ref_name" ]]; then
+            ref_name="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+          fi
           environment_file="${FORGEJO_ENV:-${GITHUB_ENV:-}}"
-          [[ -n "$environment_file" ]]
+          printf 'Release ref: %s\n' "$ref_name"
+          if [[ -z "$environment_file" ]]; then
+            echo 'Forgejo environment command file is unavailable' >&2
+            exit 1
+          fi
           [[ "$ref_name" =~ ^revision-[1-9][0-9]*$ ]] || {
             echo "Invalid release tag: $ref_name" >&2
             exit 1
