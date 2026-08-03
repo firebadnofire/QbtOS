@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    runs-on: [self-hosted, linux]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 360
     steps:
       - name: Check out tagged source
