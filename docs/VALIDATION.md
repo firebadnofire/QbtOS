@@ -124,6 +124,16 @@ separate builds byte-different.
 
 ### Hardware validation
 
+On 2026-08-05, the first A/B image was reported to reset repeatedly on a
+Raspberry Pi 4. Inspection found that U-Boot loaded `boot.scr` at `0x02400000`
+and then loaded the 24 MiB kernel at `0x02000000`, overwriting the running
+script. The load addresses now use U-Boot's Raspberry Pi layout
+(`kernel_addr_r=0x00080000`, `scriptaddr=0x05400000`), and firmware-stage UART
+logging is enabled with `uart_2ndstage=1`. The corrected image was rebuilt and
+inspected, but it has not yet been reflashed and booted on hardware. The
+connected UART produced only NUL bytes from the old image, so it provided no
+readable firmware, U-Boot, or kernel trace.
+
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted
 read-only; Ethernet obtained `192.168.86.65` by DHCP; and the manager returned
@@ -145,6 +155,12 @@ unverified end to end. Do not treat this development result as a production
 anonymity guarantee.
 
 ### Earlier QEMU validation
+
+The 2026-08-05 boot-loop investigation also booted a fresh amd64 guest, checked
+the read-only root and writable configuration/data mounts, received HTTP 200
+from the HTTPS health API, performed an orderly reboot, and received HTTP 200
+again. This validates common userspace behavior, not Raspberry Pi firmware or
+U-Boot execution.
 
 Both QEMU architectures were configured and built in independent output trees:
 

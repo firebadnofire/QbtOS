@@ -39,8 +39,9 @@ HTTP. A request to `http://LAN-IP:8080` therefore fails rather than redirecting.
 
 Development images keep the GPIO UART enabled and open at 115200 baud, 8 data
 bits, no parity, one stop bit. `config.txt` contains `enable_uart=1` and
-`dtoverlay=disable-bt`, which dedicates the stable PL011 UART to GPIO 14/15
-instead of onboard Bluetooth. U-Boot appends
+`uart_2ndstage=1`, so Raspberry Pi firmware and U-Boot diagnostics are emitted
+before Linux starts. `dtoverlay=disable-bt` dedicates the stable PL011 UART to
+GPIO 14/15 instead of onboard Bluetooth. U-Boot appends
 `console=ttyAMA0,115200n8` to the kernel command line and neither stage uses
 quiet boot. BusyBox init opens its login getty
 directly on `ttyAMA0` and respawns it whenever it exits, so the port remains
