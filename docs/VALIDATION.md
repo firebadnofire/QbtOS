@@ -156,6 +156,17 @@ because it configured Raspberry Pi firmware to load `Image` directly and did
 not contain the later U-Boot/RAUC A/B boot path. The patched image still
 requires a Raspberry Pi reboot test.
 
+That image subsequently booted on the Raspberry Pi 4 through U-Boot slot A and
+reached Buildroot init. UART showed the SquashFS root mounted read-only, the
+ext4 state partition mounted read/write, Ethernet linked at 1 Gbit/s, and the
+manager started. The host received HTTP 200 JSON status from
+`https://192.168.86.65:8080`; qBittorrent correctly remained stopped because
+setup and VPN protection were incomplete. Boot confirmation exposed a separate
+mdev integration issue: BusyBox `blkid` omitted MBR PARTUUID metadata, leaving
+the stable device links used by RAUC and `fw_printenv` absent. Early persistence
+setup now derives the MBR signature and materializes those links. That follow-up
+fix still requires an image reboot test.
+
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted
 read-only; Ethernet obtained `192.168.86.65` by DHCP; and the manager returned

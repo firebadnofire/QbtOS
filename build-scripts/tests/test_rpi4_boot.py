@@ -84,6 +84,18 @@ class RaspberryPiBootTests(unittest.TestCase):
             console_patch,
         )
 
+    def test_mdev_system_materializes_mbr_partuuid_links(self):
+        persistence = (
+            REPO
+            / "br2-external/board/qbtos/common/rootfs-overlay/etc/init.d"
+            / "S30qbtos-persistence"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("link_qbtos_mbr_partitions", persistence)
+        self.assertIn('skip=440 count=4', persistence)
+        self.assertIn('disk_signature="$4$3$2$1"', persistence)
+        self.assertIn('/dev/disk/by-partuuid/${disk_signature}-0', persistence)
+
 
 if __name__ == "__main__":
     unittest.main()

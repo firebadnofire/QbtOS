@@ -28,11 +28,43 @@ link_partuuid_devices() {
 	done
 }
 
+link_qbtos_mbr_partitions() {
+	boot_device="$(find_labeled_device QBTOS_BOOT)" || return 0
+	case "$boot_device" in
+		/dev/mmcblk*p1|/dev/nvme*n*p1)
+			disk_device="${boot_device%p1}"
+			partition_separator=p
+			;;
+		/dev/sd?1|/dev/vd?1)
+			disk_device="${boot_device%1}"
+			partition_separator=
+			;;
+		*)
+			return 0
+			;;
+	esac
+
+	# BusyBox blkid does not report MBR PARTUUIDs. Read the little-endian disk
+	# signature directly, then create the conventional signature-NN links used
+	# by the kernel, RAUC, and fw_printenv.
+	set -- $(dd if="$disk_device" bs=1 skip=440 count=4 2>/dev/null | \
+		od -An -tx1)
+	test "$#" -eq 4 || return 0
+	disk_signature="$4$3$2$1"
+	for partition_number in 1 2 3 4; do
+		partition_device="${disk_device}${partition_separator}${partition_number}"
+		test -b "$partition_device" || continue
+		ln -sf "$partition_device" \
+			"/dev/disk/by-partuuid/${disk_signature}-0${partition_number}"
+	done
+}
+
 case "$1" in
 	start)
 		printf '%s\n' 'Mounting qbtOS persistent configuration...'
 		mkdir -p /boot /config /data
 		link_partuuid_devices
+		link_qbtos_mbr_partitions
 		if ! mountpoint -q /boot; then
 			if boot_device="$(find_labeled_device QBTOS_BOOT)"; then
 				mount -o ro "$boot_device" /boot || \
