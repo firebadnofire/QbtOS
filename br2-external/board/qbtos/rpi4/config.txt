@@ -9,4 +9,5 @@ gpu_mem=16
 # Keep the PL011 UART dedicated to GPIO 14/15 (header pins 8/10).
 enable_uart=1
 uart_2ndstage=1
+init_uart_clock=48000000
 dtoverlay=disable-bt

@@ -52,10 +52,16 @@ class RaspberryPiBootTests(unittest.TestCase):
 
         self.assertIn("enable_uart=1", config)
         self.assertIn("uart_2ndstage=1", config)
+        self.assertIn("init_uart_clock=48000000", config)
         self.assertIn("enable_gic=1", config)
         self.assertIn("dtoverlay=disable-bt", config)
         self.assertIn("console=ttyAMA0,115200n8", command_line)
         self.assertIn("console=ttyAMA0,115200n8", boot_script)
+
+    def test_uboot_fatal_errors_remain_visible_on_uart(self):
+        fragment = (BOARD / "uboot.fragment").read_text(encoding="utf-8")
+
+        self.assertIn("CONFIG_PANIC_HANG=y", fragment)
 
 
 if __name__ == "__main__":

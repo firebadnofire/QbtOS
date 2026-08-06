@@ -12,3 +12,5 @@ CONFIG_CMD_PART=y
 CONFIG_CMD_FS_UUID=y
 CONFIG_CMD_SAVEENV=y
 CONFIG_BOOTDELAY=3
+# Keep fatal exceptions visible on the development UART instead of rebooting.
+CONFIG_PANIC_HANG=y
