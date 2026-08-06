@@ -22,6 +22,12 @@ labeled USB or other writable data filesystem. The imager displays a final
 destructive confirmation before unmounting the target and writing it. A custom
 image path can be supplied with `build-scripts/imager.sh --image PATH`.
 
+Desktop automounters may briefly reopen a partition while the imager updates
+the table. The imager unmounts such filesystems and retries the refresh. If it
+still reports that the device is busy, disconnect and reconnect the card, use
+`lsblk` to verify that partition 6 is the intended data partition, and format
+only that partition with `mkfs.ext4 -F -m 0 -L QBTOS_DATA /dev/sdX6`.
+
 > **DANGER: the manual `dd` command below overwrites the selected device without
 > confirmation. Choosing
 > a system disk destroys its partition table and data. Verify the whole-device

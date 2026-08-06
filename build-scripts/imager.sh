@@ -191,6 +191,37 @@ extend_partition_table() {
 		sfdisk --no-reread --no-tell-kernel --append "$device"
 }
 
+refresh_partition_table() {
+	local device=$1
+	local attempt
+
+	# A desktop automounter can reopen QBTOS_BOOT or QBTOS_STATE as soon as a
+	# partition-change event is emitted. Clear those mounts before each retry.
+	for attempt in {1..5}; do
+		unmount_children "$device"
+		if blockdev --rereadpt "$device"; then
+			command -v udevadm >/dev/null 2>&1 && udevadm settle || true
+			return 0
+		fi
+		printf 'Partition-table refresh attempt %s failed; retrying...\n' \
+			"$attempt" >&2
+		sleep 0.5
+	done
+
+	# BLKRRPART rejects a busy disk wholesale. BLKPG, used by partx, can update
+	# individual partition mappings and is a safe fallback after all filesystems
+	# have been unmounted.
+	if command -v partx >/dev/null 2>&1; then
+		unmount_children "$device"
+		if partx --update "$device"; then
+			command -v udevadm >/dev/null 2>&1 && udevadm settle || true
+			return 0
+		fi
+	fi
+
+	die "kernel could not refresh ${device}; disconnect and reconnect it, inspect partition 6 with lsblk, then create QBTOS_DATA manually"
+}
+
 extend_for_data_partition() {
 	local device=$1
 	local data_gib=$2
@@ -203,8 +234,7 @@ extend_for_data_partition() {
 	data_sectors=$((data_gib * 1024 * 1024 * 1024 / sector_size))
 	extend_partition_table "$device" "$image_sectors" "$data_sectors" "$sector_size"
 
-	blockdev --rereadpt "$device"
-	command -v udevadm >/dev/null 2>&1 && udevadm settle || true
+	refresh_partition_table "$device"
 	data_device=$(partition_path "$device" 6)
 	for _ in {1..50}; do
 		[[ -b "$data_device" ]] && break
@@ -278,11 +308,11 @@ main() {
 	dd if="$image_path" of="$selected_device" bs=4M status=progress conv=fsync
 	printf '%s\n' "Verifying the written OS image..."
 	cmp --bytes="$image_bytes" "$image_path" "$selected_device"
-	blockdev --rereadpt "$selected_device" || true
-	command -v udevadm >/dev/null 2>&1 && udevadm settle || true
 	if ((data_gib > 0)); then
 		printf 'Creating %s GiB QBTOS_DATA filesystem...\n' "$data_gib"
 		extend_for_data_partition "$selected_device" "$data_gib"
+	else
+		refresh_partition_table "$selected_device"
 	fi
 	sync
 

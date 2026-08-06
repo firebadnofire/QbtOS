@@ -41,6 +41,25 @@ class ImagerTests(unittest.TestCase):
         self.assertIn('DESTROY ALL DATA?', source)
         self.assertIn('[[ "$type" == "disk" ]]', source)
 
+    def test_partition_refresh_handles_automount_races(self):
+        source = IMAGER.read_text(encoding="utf-8")
+
+        refresh = source.split("refresh_partition_table() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn('unmount_children "$device"', refresh)
+        self.assertIn('for attempt in {1..5}', refresh)
+        self.assertIn('partx --update "$device"', refresh)
+
+        main = source.split("main() {", 1)[1]
+        extend_call = main.index(
+            'extend_for_data_partition "$selected_device" "$data_gib"'
+        )
+        first_refresh = main.index(
+            'refresh_partition_table "$selected_device"'
+        )
+        self.assertGreater(first_refresh, extend_call)
+
     def test_image_reserves_an_extended_partition_for_data(self):
         genimage = (
             REPO / "br2-external/board/qbtos/rpi4/genimage.cfg"
