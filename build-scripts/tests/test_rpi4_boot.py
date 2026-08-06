@@ -60,6 +60,9 @@ class RaspberryPiBootTests(unittest.TestCase):
 
     def test_uboot_fatal_errors_remain_visible_on_uart(self):
         fragment = (BOARD / "uboot.fragment").read_text(encoding="utf-8")
+        trace_patch = (
+            BOARD / "patches/uboot/0001-initcall-trace-early-uart.patch"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("CONFIG_PANIC_HANG=y", fragment)
         self.assertIn("CONFIG_DEBUG_UART=y", fragment)
@@ -67,6 +70,8 @@ class RaspberryPiBootTests(unittest.TestCase):
         self.assertIn("CONFIG_DEBUG_UART_BASE=0xfe201000", fragment)
         self.assertIn("CONFIG_DEBUG_UART_CLOCK=48000000", fragment)
         self.assertIn("CONFIG_DEBUG_UART_ANNOUNCE=y", fragment)
+        self.assertIn('printascii("[init] " #_call', trace_patch)
+        self.assertIn("GD_FLG_HAVE_CONSOLE", trace_patch)
 
 
 if __name__ == "__main__":

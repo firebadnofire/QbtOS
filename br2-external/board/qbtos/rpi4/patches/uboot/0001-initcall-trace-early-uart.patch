@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: qbtOS Developers <qbtos@example.invalid>
+Date: Wed, 5 Aug 2026 22:40:00 -0400
+Subject: [PATCH] initcall: trace pre-console calls on debug UART
+
+Raspberry Pi development images need actionable output when an early U-Boot
+initcall stalls before driver-model serial is available. Print the initcall
+name and its successful return while the normal console is unavailable.
+
+The debug UART helpers compile to no-ops when CONFIG_DEBUG_UART is disabled.
+Once the normal console is active, avoid the debug UART so it cannot conflict
+with driver-model serial.
+
+Signed-off-by: qbtOS Developers <qbtos@example.invalid>
+---
+ include/initcall.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/include/initcall.h b/include/initcall.h
+index b64854feef..678db2fa33 100644
+--- a/include/initcall.h
++++ b/include/initcall.h
+@@ -6,6 +6,7 @@
+ #ifndef __INITCALL_H
+ #define __INITCALL_H
+ 
++#include <debug_uart.h>
+ #include <asm/types.h>
+ #include <event.h>
+ #include <hang.h>
+@@ -14,11 +15,15 @@ _Static_assert(EVT_COUNT < 256, "Can only support 256 event types with 8 bits");
+ 
+ #define INITCALL(_call) \
+ 	do { \
++		if (!(gd->flags & GD_FLG_HAVE_CONSOLE)) \
++			printascii("[init] " #_call "\n"); \
+ 		if (_call()) { \
+ 			printf("%s(): initcall %s() failed\n", __func__, \
+ 			       #_call); \
+ 			hang(); \
+ 		} \
++		if (!(gd->flags & GD_FLG_HAVE_CONSOLE)) \
++			printascii("[ ok ] " #_call "\n"); \
+ 	} while (0)
+ 
+ #define INITCALL_EVT(_evt) \
+-- 
+2.50.1
