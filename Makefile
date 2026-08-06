@@ -30,8 +30,8 @@ endif
 unexport LD_LIBRARY_PATH
 unexport PKG_CONFIG_PATH
 
-.PHONY: all configure build image rebuild clean distclean menuconfig savedefconfig \
-	check legal-info release development-release release-version
+.PHONY: all configure build image imager rebuild clean distclean menuconfig \
+	savedefconfig check legal-info release development-release release-version
 
 all: build
 
@@ -43,6 +43,9 @@ build:
 		"$(BUILD_SCRIPT)" $(BUILD_OPTIONS) --skip-configure
 
 image: build
+
+imager:
+	"$(CURDIR)/build-scripts/imager.sh"
 
 rebuild: clean build
 

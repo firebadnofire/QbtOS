@@ -21,6 +21,8 @@ Raspberry Pi A/B release and recovery procedures are in
 [docs/UPDATES.md](docs/UPDATES.md).
 
 The equivalent two-step Make interface is `make configure && make build`.
+After building, run `make imager` to select a whole block device in a terminal
+UI and optionally allocate an on-card ext4 `QBTOS_DATA` storage partition.
 
 Build and run an amd64 or arm64 QEMU appliance with:
 

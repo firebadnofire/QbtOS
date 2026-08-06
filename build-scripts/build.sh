@@ -206,7 +206,7 @@ if [[ "$format" == "flat" ]]; then
 			exit 1
 		}
 	done
-	[[ "$(stat -c %s "${output_dir}/images/sdcard.img")" -eq $((0x30100000)) ]] || {
+	[[ "$(stat -c %s "${output_dir}/images/sdcard.img")" -eq $((0x30200000)) ]] || {
 		printf 'SD image does not reach its declared partition-table end: %s\n' \
 			"${output_dir}/images/sdcard.img" >&2
 		exit 1

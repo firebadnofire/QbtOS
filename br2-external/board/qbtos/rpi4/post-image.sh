@@ -35,17 +35,17 @@ done
 	--outputpath "${BINARIES_DIR}" \
 	--config "${board_dir}/genimage.cfg"
 
-# The 511 MiB ext4 image leaves a 1 MiB tail in partition 4. U-Boot uses two
-# raw, CRC-protected environment records there so a power loss during saveenv
-# cannot destroy the last valid slot-selection state.
+# The 511 MiB ext4 image leaves a 1 MiB tail in logical partition 5. U-Boot
+# uses two raw, CRC-protected environment records there so a power loss during
+# saveenv cannot destroy the last valid slot-selection state.
 test "$(wc -c < "${BINARIES_DIR}/uboot-env.bin")" -eq $((0x4000))
 dd if="${BINARIES_DIR}/uboot-env.bin" of="${BINARIES_DIR}/sdcard.img" \
-	bs=512 seek=$((0x180000)) conv=notrunc status=none
+	bs=512 seek=$((0x180800)) conv=notrunc status=none
 dd if="${BINARIES_DIR}/uboot-env.bin" of="${BINARIES_DIR}/sdcard.img" \
-	bs=512 seek=$((0x180020)) conv=notrunc status=none
+	bs=512 seek=$((0x180820)) conv=notrunc status=none
 # genimage records the full 512 MiB partition size in the MBR but normally
 # stops the sparse file at its last input byte. Extend it through the declared
-# end of partition 4 after placing both environment records.
-truncate -s $((0x30100000)) "${BINARIES_DIR}/sdcard.img"
+# end of the state partition after placing both environment records.
+truncate -s $((0x30200000)) "${BINARIES_DIR}/sdcard.img"
 
 printf '%s\n' "qbtOS image created: ${BINARIES_DIR}/sdcard.img"

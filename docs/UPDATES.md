@@ -11,7 +11,7 @@ PARTUUIDs ending in `-02` and `-03`; RAUC never targets the active slot.
 The state partition is 512 MiB; its ext4 filesystem occupies the first 511 MiB.
 U-Boot stores two redundant, CRC-protected 16 KiB environment records in the
 reserved tail at partition-relative offsets `0x1ff00000` and `0x1ff04000`.
-Linux reaches the same records through state PARTUUID `5142544f-04`, while
+Linux reaches the same records through state PARTUUID `5142544f-05`, while
 U-Boot uses the corresponding fixed whole-disk offsets. This avoids U-Boot's
 non-redundant ext4 environment backend and keeps the records outside filesystem
 allocation. `BOOT_ORDER`, `BOOT_A_LEFT`, and `BOOT_B_LEFT` implement

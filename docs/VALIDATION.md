@@ -11,7 +11,7 @@ a72efa6b048bf6eccbca967da39c7ba9a63091131f74f66cd12d5e01bda1beb6
 
 It was regenerated after the live VM findings from the clean Buildroot base.
 `fdisk` and `partx` report disk signature `0x5142544f` and the expected 64 MiB
-FAT boot, 96 MiB slot A, 96 MiB slot B, and 512 MiB state partitions with
+FAT boot, 96 MiB slot A, 96 MiB slot B, and 512 MiB logical state partitions with
 PARTUUIDs `5142544f-01` through `-04`. Byte comparisons matched the boot image,
 both SquashFS slots, the 511 MiB state filesystem, and both 16 KiB redundant
 U-Boot environment records. `fw_printenv` read `BOOT_ORDER=A B` and three
@@ -166,6 +166,21 @@ mdev integration issue: BusyBox `blkid` omitted MBR PARTUUID metadata, leaving
 the stable device links used by RAUC and `fw_printenv` absent. Early persistence
 setup now derives the MBR signature and materializes those links. That follow-up
 fix still requires an image reboot test.
+
+### Interactive imager validation
+
+The SD image now uses a DOS extended partition so the immutable boot and A/B
+slots remain primary, `QBTOS_STATE` is logical partition 5, and the imager can
+append `QBTOS_DATA` as logical partition 6. Host inspection found all five base
+entries, byte-compared the embedded state filesystem with `state.ext4`, and
+confirmed the redundant U-Boot environment at its shifted fixed offsets. A
+disposable sparse 3 GiB image test extended partition 4, preserved partitions
+1 through 5, and added an exact 1 GiB Linux partition 6. Unit tests cover
+external/large-device tags, zero-size behavior, destructive confirmation, and
+the append operation. This environment does not permit loop-device attachment,
+so the final `mkfs.ext4` call was not exercised through a fake block device.
+The extended-partition image and imager output have not yet been booted on
+Raspberry Pi hardware.
 
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted

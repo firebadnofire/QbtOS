@@ -6,8 +6,10 @@ The Raspberry Pi firmware loads U-Boot, `Image`, the boot script, and the board
 DTB from a 64 MiB FAT partition. U-Boot selects partition 2 (slot A) or 3 (slot
 B) as a read-only SquashFS root by PARTUUID. Buildroot's volatile `/run` and
 `/tmp` paths hold ordinary runtime writes, so a whole-root OverlayFS is not
-needed. Partition 4 is 512 MiB: a 511 MiB ext4 filesystem labeled
-`QBTOS_STATE`, mounted at `/config`, plus a reserved boot-environment tail.
+needed. MBR partition 4 is an extended container. Logical partition 5 is 512
+MiB: a 511 MiB ext4 filesystem labeled `QBTOS_STATE`, mounted at `/config`,
+plus a reserved boot-environment tail. The interactive imager can add logical
+partition 6 as a user-sized ext4 filesystem labeled `QBTOS_DATA`.
 
 Early init finds configuration and optional data devices by inspecting block
 metadata for `QBTOS_STATE` (with legacy `QBTOS_CONFIG` compatibility) and the
