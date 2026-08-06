@@ -74,6 +74,16 @@ class RaspberryPiBootTests(unittest.TestCase):
         self.assertIn('printascii("[init] " #_call', trace_patch)
         self.assertIn("GD_FLG_HAVE_CONSOLE", trace_patch)
 
+    def test_unbound_console_node_falls_back_without_dereference(self):
+        console_patch = (
+            BOARD / "patches/uboot/0002-serial-check-bound-console.patch"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "*devp && device_get_uclass_id(*devp) == UCLASS_SERIAL",
+            console_patch,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

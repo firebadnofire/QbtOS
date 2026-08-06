@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: qbtOS Developers <qbtos@example.invalid>
+Date: Wed, 5 Aug 2026 23:20:00 -0400
+Subject: [PATCH] serial: check that stdout device was bound
+
+lists_bind_fdt() returns zero when no driver matches a node and clears the
+output device pointer. serial_check_stdout() treated every zero return as a
+successful bind and dereferenced the resulting NULL pointer.
+
+This is observable on Raspberry Pi 4 after its firmware applies the serial
+aliases and disable-bt overlay: U-Boot takes a synchronous abort during
+serial_init before it can reach the console. Only inspect and probe the device
+when lists_bind_fdt() actually returned one. The existing fallback search can
+then select an available serial device.
+
+Signed-off-by: qbtOS Developers <qbtos@example.invalid>
+---
+ drivers/serial/serial-uclass.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/serial/serial-uclass.c b/drivers/serial/serial-uclass.c
+index c22a17f6f4..b9fdcb9b36 100644
+--- a/drivers/serial/serial-uclass.c
++++ b/drivers/serial/serial-uclass.c
+@@ -63,7 +63,7 @@ static int serial_check_stdout(const void *blob, struct udevice **devp)
+ 	 */
+ 	if (node > 0 && !lists_bind_fdt(gd->dm_root, offset_to_ofnode(node),
+ 					devp, NULL, false)) {
+-		if (device_get_uclass_id(*devp) == UCLASS_SERIAL &&
++		if (*devp && device_get_uclass_id(*devp) == UCLASS_SERIAL &&
+ 		    !device_probe(*devp))
+ 			return 0;
+ 	}
+-- 
+2.50.1

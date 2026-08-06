@@ -145,6 +145,17 @@ Raspberry Pi memory variables, and leaves a failed kernel boot at the recovery
 prompt instead of resetting. A new image containing these changes has been
 built and inspected but remains to be reflashed and hardware-tested.
 
+Subsequent UART tracing localized the reset to U-Boot's pre-relocation
+`serial_init`. Address resolution against the matching U-Boot ELF showed
+`serial_check_stdout()` calling `device_get_uclass_id()` with no device:
+`lists_bind_fdt()` may return success while clearing its output pointer when no
+driver matches the firmware-modified console node. The qbtOS U-Boot patch now
+requires a non-NULL bound device before inspecting it, allowing the existing
+fallback serial search to run. Commit `164a1a8b99` did not exhibit this failure
+because it configured Raspberry Pi firmware to load `Image` directly and did
+not contain the later U-Boot/RAUC A/B boot path. The patched image still
+requires a Raspberry Pi reboot test.
+
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted
 read-only; Ethernet obtained `192.168.86.65` by DHCP; and the manager returned
