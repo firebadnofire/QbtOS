@@ -38,7 +38,10 @@ class ImagerTests(unittest.TestCase):
         source = IMAGER.read_text(encoding="utf-8")
 
         self.assertIn("How much free space following the OS do you want?", source)
-        self.assertIn("Enter 0 to use your own USB", source)
+        self.assertIn("Enter 0 to use", source)
+        self.assertIn("your own USB", source)
+        self.assertIn("Choose the filesystem for QBTOS_DATA.", source)
+        self.assertIn('ntfs "Windows compatible', source)
         self.assertIn('DESTROY ALL DATA?', source)
         self.assertIn('[[ "$type" == "disk" ]]', source)
 
@@ -135,6 +138,48 @@ class ImagerTests(unittest.TestCase):
         for number in range(1, 7):
             self.assertIn(f"device.img{number} :", table)
         self.assertIn("size=     2097152, type=83", table)
+
+    @unittest.skipUnless(IMAGE.exists() and shutil.which("sfdisk"),
+                         "built SD image and sfdisk are required")
+    def test_ntfs_data_partition_uses_windows_partition_type(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "device.img"
+            subprocess.run(
+                ["cp", "--sparse=always", str(IMAGE), str(image)], check=True
+            )
+            subprocess.run(["truncate", "-s", "3G", str(image)], check=True)
+            image_sectors = IMAGE.stat().st_size // 512
+            data_sectors = 1024**3 // 512
+            bash(
+                f'extend_partition_table "{image}" '
+                f'{image_sectors} {data_sectors} 512 7'
+            )
+            table = subprocess.run(
+                ["sfdisk", "-d", str(image)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            ).stdout
+
+        self.assertIn("size=     2097152, type=7", table)
+
+    def test_target_supports_labeled_ntfs_data(self):
+        kernel = (
+            REPO / "br2-external/board/qbtos/common/kernel.fragment"
+        ).read_text(encoding="utf-8")
+        busybox = (
+            REPO / "br2-external/board/qbtos/common/busybox.fragment"
+        ).read_text(encoding="utf-8")
+        persistence = (
+            REPO
+            / "br2-external/board/qbtos/common/rootfs-overlay/etc/init.d"
+            / "S30qbtos-persistence"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CONFIG_NTFS3_FS=y", kernel)
+        self.assertIn("CONFIG_FEATURE_VOLUMEID_NTFS=y", busybox)
+        self.assertIn("mount -t ntfs3", persistence)
+        self.assertIn("windows_names", persistence)
 
 
 if __name__ == "__main__":

@@ -52,8 +52,9 @@ PARTUUID; persistent filesystems are discovered by their `QBTOS_CONFIG` and
 `QBTOS_DATA` labels rather than architecture-dependent virtio device names.
 
 Open `https://127.0.0.1:8080`. The self-signed certificate warning is expected.
-The qBittorrent Web UI is forwarded to host port 8081, but qBittorrent remains
-disabled until setup and VPN protection checks succeed.
+The qBittorrent HTTPS Web UI is forwarded to `https://127.0.0.1:8081` and uses
+the same certificate, but qBittorrent remains disabled until setup and VPN
+protection checks succeed.
 
 Override conflicting host ports without changing guest firewall rules:
 

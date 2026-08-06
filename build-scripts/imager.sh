@@ -13,7 +13,7 @@ usage() {
 Usage: build-scripts/imager.sh [--image PATH]
 
 Interactively select a whole block device, write the qbtOS SD image, and
-optionally create a separate QBTOS_DATA ext4 partition after the OS.
+optionally create a separate ext4 or NTFS QBTOS_DATA partition after the OS.
 
 Options:
   --image PATH  Raw qbtOS SD image (default: output/images/sdcard.img)
@@ -113,7 +113,10 @@ select_data_size() {
 	((default_gib > 0)) || default_gib=0
 	while true; do
 		answer=$(whiptail --title "qbtOS Data Storage" --inputbox \
-			"How much free space following the OS do you want?\n\nEnter an integer size in GiB (maximum ${maximum_gib}). This creates a separate QBTOS_DATA ext4 partition for bootstrap and storage. Enter 0 to use your own USB or other external data drive." \
+			"How much free space following the OS do you want?\n\n"\
+"Enter an integer size in GiB (maximum ${maximum_gib}). This creates a "\
+"separate QBTOS_DATA partition for bootstrap and storage. Enter 0 to use "\
+"your own USB or other external data drive." \
 			16 78 "$default_gib" 3>&1 1>&2 2>&3) || return 1
 		if [[ "$answer" =~ ^[0-9]+$ ]] && ((answer <= maximum_gib)); then
 			printf '%s\n' "$answer"
@@ -122,6 +125,14 @@ select_data_size() {
 		whiptail --title "Invalid size" --msgbox \
 			"Enter a whole number from 0 through ${maximum_gib}." 8 60
 	done
+}
+
+select_data_filesystem() {
+	whiptail --title "qbtOS Data Filesystem" \
+		--menu "Choose the filesystem for QBTOS_DATA." 14 74 2 \
+		ext4 "Linux native (recommended)" \
+		ntfs "Windows compatible (future Windows installer support)" \
+		3>&1 1>&2 2>&3
 }
 
 mounted_children() {
@@ -155,6 +166,7 @@ confirm_write() {
 	local device=$1
 	local image=$2
 	local data_gib=$3
+	local data_filesystem=$4
 	local device_summary mounts data_summary
 
 	device_summary=$(lsblk -dn -o PATH,SIZE,MODEL,TRAN,RM "$device")
@@ -163,11 +175,13 @@ confirm_write() {
 	if ((data_gib == 0)); then
 		data_summary="No on-device QBTOS_DATA partition will be created."
 	else
-		data_summary="A ${data_gib} GiB QBTOS_DATA ext4 partition will be created."
+		data_summary="A ${data_gib} GiB QBTOS_DATA ${data_filesystem} partition will be created."
 	fi
 
 	whiptail --title "DESTROY ALL DATA?" --yesno \
-		"The selected device and every filesystem on it will be overwritten.\n\nDevice: ${device_summary}\nImage: ${image}\nMounted children:\n${mounts}\n\n${data_summary}\n\nContinue?" \
+		"The selected device and every filesystem on it will be overwritten.\n\n"\
+"Device: ${device_summary}\nImage: ${image}\nMounted children:\n${mounts}\n\n"\
+"${data_summary}\n\nContinue?" \
 		20 78
 }
 
@@ -176,6 +190,7 @@ extend_partition_table() {
 	local image_sectors=$2
 	local data_sectors=$3
 	local sector_size=${4:-512}
+	local partition_type=${5:-83}
 	local data_start extended_start extended_size
 
 	data_start=$((image_sectors + alignment_bytes / sector_size))
@@ -187,7 +202,7 @@ extend_partition_table() {
 
 	printf ',%s,f\n' "$extended_size" | \
 		sfdisk --no-reread --no-tell-kernel -N 4 "$device"
-	printf ',%s,83\n' "$data_sectors" | \
+	printf ',%s,%s\n' "$data_sectors" "$partition_type" | \
 		sfdisk --no-reread --no-tell-kernel --append "$device"
 }
 
@@ -219,7 +234,8 @@ refresh_partition_table() {
 		fi
 	fi
 
-	die "kernel could not refresh ${device}; disconnect and reconnect it, inspect partition 6 with lsblk, then create QBTOS_DATA manually"
+	die "kernel could not refresh ${device}; disconnect and reconnect it, "\
+"inspect partition 6 with lsblk, then create QBTOS_DATA manually"
 }
 
 cached_image_sha256() {
@@ -267,14 +283,28 @@ verify_written_image() {
 extend_for_data_partition() {
 	local device=$1
 	local data_gib=$2
+	local data_filesystem=$3
 	local sector_size image_sectors data_sectors data_device
+	local partition_type
 
 	sector_size=$(blockdev --getss "$device")
 	[[ "$sector_size" == "512" ]] || die \
 		"${device} uses ${sector_size}-byte logical sectors; qbtOS requires 512"
 	image_sectors=$(( $(stat -c %s "$image_path") / sector_size ))
 	data_sectors=$((data_gib * 1024 * 1024 * 1024 / sector_size))
-	extend_partition_table "$device" "$image_sectors" "$data_sectors" "$sector_size"
+	case "$data_filesystem" in
+		ext4)
+			partition_type=83
+			;;
+		ntfs)
+			partition_type=7
+			;;
+		*)
+			die "unsupported data filesystem: ${data_filesystem}"
+			;;
+	esac
+	extend_partition_table "$device" "$image_sectors" "$data_sectors" \
+		"$sector_size" "$partition_type"
 
 	refresh_partition_table "$device"
 	data_device=$(partition_path "$device" 6)
@@ -283,11 +313,19 @@ extend_for_data_partition() {
 		sleep 0.1
 	done
 	[[ -b "$data_device" ]] || die "partition device did not appear: ${data_device}"
-	mkfs.ext4 -F -m 0 -L QBTOS_DATA "$data_device"
+	case "$data_filesystem" in
+		ext4)
+		mkfs.ext4 -F -m 0 -L QBTOS_DATA "$data_device"
+		;;
+		ntfs)
+		mkfs.ntfs -F -f -L QBTOS_DATA "$data_device"
+		;;
+	esac
 }
 
 main() {
-	local selected_device data_gib device_bytes image_bytes maximum_gib
+	local selected_device data_gib data_filesystem data_summary
+	local device_bytes image_bytes maximum_gib
 	image_path=$default_image
 
 	while (($#)); do
@@ -311,7 +349,7 @@ main() {
 		"image is missing or empty: ${image_path}"
 
 	for command_name in whiptail lsblk numfmt realpath blockdev dd cmp sha256sum sfdisk \
-		awk grep sed stat tr sleep umount mkfs.ext4 sync; do
+		awk grep sed stat tr sleep umount sync; do
 		require_command "$command_name"
 	done
 	[[ -t 0 && -t 1 ]] || die "the imager requires an interactive terminal"
@@ -340,7 +378,23 @@ main() {
 		printf '%s\n' "Imaging cancelled."
 		return 0
 	}
-	confirm_write "$selected_device" "$image_path" "$data_gib" || {
+	data_filesystem=none
+	if ((data_gib > 0)); then
+		data_filesystem=$(select_data_filesystem) || {
+			printf '%s\n' "Imaging cancelled."
+			return 0
+		}
+		case "$data_filesystem" in
+			ext4)
+				require_command mkfs.ext4
+				;;
+			ntfs)
+				require_command mkfs.ntfs
+				;;
+		esac
+	fi
+	confirm_write "$selected_device" "$image_path" "$data_gib" \
+		"$data_filesystem" || {
 		printf '%s\n' "Imaging cancelled."
 		return 0
 	}
@@ -351,15 +405,24 @@ main() {
 	printf '%s\n' "Verifying the written OS image..."
 	verify_written_image "$selected_device" "$image_path" "$image_bytes"
 	if ((data_gib > 0)); then
-		printf 'Creating %s GiB QBTOS_DATA filesystem...\n' "$data_gib"
-		extend_for_data_partition "$selected_device" "$data_gib"
+		printf 'Creating %s GiB %s QBTOS_DATA filesystem...\n' \
+			"$data_gib" "$data_filesystem"
+		extend_for_data_partition "$selected_device" "$data_gib" \
+			"$data_filesystem"
 	else
 		refresh_partition_table "$selected_device"
 	fi
 	sync
 
+	if ((data_gib > 0)); then
+		data_summary="${data_gib} GiB of on-device QBTOS_DATA storage "\
+"(${data_filesystem}) was created."
+	else
+		data_summary="No on-device QBTOS_DATA storage was created."
+	fi
 	whiptail --title "qbtOS Imager" --msgbox \
-		"qbtOS was written successfully to ${selected_device}.\n\n${data_gib} GiB of on-device QBTOS_DATA storage was selected. You may now remove the device safely." \
+		"qbtOS was written successfully to ${selected_device}.\n\n"\
+"${data_summary} You may now remove the device safely." \
 		12 72
 }
 

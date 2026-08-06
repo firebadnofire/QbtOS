@@ -7,16 +7,18 @@ disk image. The recommended interactive writer is:
 make imager
 ```
 
-The terminal UI requires `whiptail`, `lsblk`, `sfdisk`, `mkfs.ext4`, and the
-other standard util-linux/coreutils tools listed by its startup checks. It
-shows every whole block device. Removable or hot-plug devices carry an
+The terminal UI requires `whiptail`, `lsblk`, `sfdisk`, and the other standard
+util-linux/coreutils tools listed by its startup checks. It also needs
+`mkfs.ext4`, or `mkfs.ntfs` when NTFS is selected. It shows every whole block
+device. Removable or hot-plug devices carry an
 `(external)` tag; devices larger than 100 GiB carry a `(large device)` tag.
 These are warnings, not selection filters.
 
 Run the imager as root (for example, `sudo make imager`) when your account
 cannot write the selected block device. After device selection, enter an
-integer number of GiB for an on-card
-`QBTOS_DATA` ext4 filesystem. qbtOS automatically mounts it at `/data`. Enter
+integer number of GiB for an on-card `QBTOS_DATA` filesystem, then choose ext4
+(recommended for a dedicated qbtOS appliance) or NTFS (for future Windows
+installer interoperability). qbtOS automatically mounts either at `/data`. Enter
 `0` to leave the remaining card space unallocated and provide a separately
 labeled USB or other writable data filesystem. The imager displays a final
 destructive confirmation before unmounting the target and writing it. A custom
@@ -27,9 +29,14 @@ the imager falls back to a direct byte comparison.
 
 Desktop automounters may briefly reopen a partition while the imager updates
 the table. The imager unmounts such filesystems and retries the refresh. If it
-still reports that the device is busy, disconnect and reconnect the card, use
-`lsblk` to verify that partition 6 is the intended data partition, and format
-only that partition with `mkfs.ext4 -F -m 0 -L QBTOS_DATA /dev/sdX6`.
+still reports that the device is busy, disconnect and reconnect the card and
+use `lsblk` to verify that partition 6 is the intended data partition. Format
+only that partition with the command matching the selection:
+
+```bash
+sudo mkfs.ext4 -F -m 0 -L QBTOS_DATA /dev/sdX6
+sudo mkfs.ntfs -F -f -L QBTOS_DATA /dev/sdX6  # NTFS only
+```
 
 > **DANGER: the manual `dd` command below overwrites the selected device without
 > confirmation. Choosing
@@ -59,4 +66,4 @@ NVMe, MMC, and USB readers may appear as `/dev/nvme...`, `/dev/mmcblk...`, or
 Raspberry Pi Imager or another generic raw-image writer is also acceptable.
 Choose its custom-image option and select `sdcard.img`. Generic raw writers do
 not create the optional on-card `QBTOS_DATA` partition; attach separate storage
-or create a labeled ext4 filesystem manually.
+or create a labeled ext4 or NTFS filesystem manually.

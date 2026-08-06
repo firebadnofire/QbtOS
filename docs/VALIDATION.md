@@ -189,6 +189,13 @@ so the final `mkfs.ext4` call was not exercised through a fake block device.
 The extended-partition image and imager output have not yet been booted on
 Raspberry Pi hardware.
 
+The imager can also create partition 6 with MBR type 7 and an NTFS filesystem;
+the target includes NTFS label detection and a writable NTFS3 mount path. Those
+paths have unit and configuration coverage but have not yet been exercised on
+Raspberry Pi hardware. qBittorrent is configured to reuse the manager TLS
+certificate on port 8081; that HTTPS endpoint also awaits rebuilt-image runtime
+validation.
+
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted
 read-only; Ethernet obtained `192.168.86.65` by DHCP; and the manager returned

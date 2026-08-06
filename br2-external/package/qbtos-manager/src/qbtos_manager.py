@@ -92,6 +92,34 @@ def qbittorrent_password_hash(password):
     return f"{base64.b64encode(salt).decode()}:{base64.b64encode(digest).decode()}"
 
 
+def qbittorrent_https_options():
+    return (
+        f"WebUI\\HTTPS\\CertificatePath={TLS_CERT}",
+        "WebUI\\HTTPS\\Enabled=true",
+        f"WebUI\\HTTPS\\KeyPath={TLS_KEY}",
+    )
+
+
+def add_qbittorrent_https(config):
+    prefixes = tuple(f"{line.split('=', 1)[0]}=" for line in qbittorrent_https_options())
+    lines = [line for line in config.splitlines()
+             if not line.startswith(prefixes)]
+    try:
+        preferences = lines.index("[Preferences]")
+    except ValueError:
+        if lines and lines[-1]:
+            lines.append("")
+        lines.append("[Preferences]")
+        preferences = len(lines) - 1
+    insertion = len(lines)
+    for index in range(preferences + 1, len(lines)):
+        if lines[index].startswith("[") and lines[index].endswith("]"):
+            insertion = index
+            break
+    lines[insertion:insertion] = qbittorrent_https_options()
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def validate_account(username, password):
     if not USERNAME_RE.fullmatch(username or ""):
         raise ValidationError(
@@ -314,10 +342,17 @@ def write_qbittorrent_config(settings, qbt_password):
     )
     for directory in profile_directories:
         directory.mkdir(parents=True, exist_ok=True)
-    for directory in (
-            *profile_directories, Path(data_path),
-            Path(data_path) / "downloads", Path(data_path) / "incomplete"):
+    for directory in profile_directories:
         os.chown(directory, account.pw_uid, account.pw_gid)
+    for directory in (
+            Path(data_path), Path(data_path) / "downloads",
+            Path(data_path) / "incomplete"):
+        try:
+            os.chown(directory, account.pw_uid, account.pw_gid)
+        except OSError:
+            metadata = directory.stat()
+            if metadata.st_uid != account.pw_uid or metadata.st_gid != account.pw_gid:
+                raise
     interface = settings["vpn_interface"]
     config = f"""[BitTorrent]
 Session\\DefaultSavePath={data_path}/downloads
@@ -333,6 +368,9 @@ Accepted=true
 [Preferences]
 Connection\\UPnP=false
 WebUI\\Address=*
+WebUI\\HTTPS\\CertificatePath={TLS_CERT}
+WebUI\\HTTPS\\Enabled=true
+WebUI\\HTTPS\\KeyPath={TLS_KEY}
 WebUI\\Password_PBKDF2=\"@ByteArray({qbt_password})\"
 WebUI\\Port=8081
 WebUI\\ServerDomains=*
@@ -340,6 +378,15 @@ WebUI\\UseUPnP=false
 WebUI\\Username={settings['qb_username']}
 """
     atomic_write(QBT_CONFIG, config)
+    os.chown(QBT_CONFIG, account.pw_uid, account.pw_gid)
+
+
+def ensure_qbittorrent_https():
+    if not QBT_CONFIG.exists():
+        return
+    config = add_qbittorrent_https(QBT_CONFIG.read_text(encoding="utf-8"))
+    atomic_write(QBT_CONFIG, config)
+    account = pwd.getpwnam("qbtos-qbt")
     os.chown(QBT_CONFIG, account.pw_uid, account.pw_gid)
 
 
@@ -473,6 +520,7 @@ def ensure_tls():
         try:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(TLS_CERT, TLS_KEY)
+            secure_tls_permissions()
             return
         except (OSError, ssl.SSLError):
             pass
@@ -497,6 +545,17 @@ def ensure_tls():
         context.load_cert_chain(temporary_cert, temporary_key)
         os.replace(temporary_key, TLS_KEY)
         os.replace(temporary_cert, TLS_CERT)
+    secure_tls_permissions()
+
+
+def secure_tls_permissions():
+    account = pwd.getpwnam("qbtos-qbt")
+    os.chown(TLS_KEY.parent, 0, account.pw_gid)
+    TLS_KEY.parent.chmod(0o750)
+    os.chown(TLS_KEY, 0, account.pw_gid)
+    TLS_KEY.chmod(0o640)
+    os.chown(TLS_CERT, 0, account.pw_gid)
+    TLS_CERT.chmod(0o640)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -636,6 +695,7 @@ def main():
     if not Path("/config").is_mount():
         raise SystemExit("qbtOS configuration partition is not mounted; refusing ephemeral setup")
     ensure_tls()
+    ensure_qbittorrent_https()
     bind_address = wait_for_lan_ip()
     server = http.server.ThreadingHTTPServer(
         (bind_address, 8080), Handler)

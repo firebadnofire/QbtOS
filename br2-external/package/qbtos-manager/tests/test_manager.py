@@ -26,6 +26,20 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(len(manager.base64.b64decode(salt)), 16)
         self.assertEqual(len(manager.base64.b64decode(digest)), 64)
 
+    def test_qbittorrent_webui_reuses_manager_tls_identity(self):
+        config = manager.add_qbittorrent_https(
+            "[Preferences]\nWebUI\\HTTPS\\Enabled=false\n"
+            "WebUI\\Port=8081\n\n[Other]\nValue=true\n")
+
+        self.assertIn(
+            f"WebUI\\HTTPS\\CertificatePath={manager.TLS_CERT}", config)
+        self.assertIn("WebUI\\HTTPS\\Enabled=true", config)
+        self.assertIn(f"WebUI\\HTTPS\\KeyPath={manager.TLS_KEY}", config)
+        self.assertNotIn("WebUI\\HTTPS\\Enabled=false", config)
+        self.assertLess(
+            config.index("WebUI\\HTTPS\\Enabled=true"),
+            config.index("[Other]"))
+
     def test_wireguard_full_tunnel_is_normalized(self):
         config = """[Interface]
 PrivateKey = secret

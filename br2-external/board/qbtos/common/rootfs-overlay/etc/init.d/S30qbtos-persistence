@@ -14,6 +14,24 @@ find_labeled_device() {
 	return 1
 }
 
+mount_data_device() {
+	data_device="$1"
+	filesystem_type="$(blkid "$data_device" 2>/dev/null | \
+		sed -n 's/.* TYPE="\([^"]*\)".*/\1/p')"
+	case "$filesystem_type" in
+		ntfs|ntfs3)
+			data_uid="$(id -u qbtos-qbt)" || return 1
+			data_gid="$(id -g qbtos-qbt)" || return 1
+			mount -t ntfs3 -o \
+				"noatime,uid=${data_uid},gid=${data_gid},umask=0077,windows_names" \
+				"$data_device" /data
+			;;
+		*)
+			mount -o noatime "$data_device" /data
+			;;
+	esac
+}
+
 link_partuuid_devices() {
 	mkdir -p /dev/disk/by-partuuid
 	for block_device in /dev/mmcblk*p* /dev/sd*[0-9] \
@@ -86,7 +104,7 @@ case "$1" in
 			/config/qbtos/qbittorrent
 		if ! mountpoint -q /data; then
 			if data_device="$(find_labeled_device QBTOS_DATA)"; then
-				mount -o noatime "$data_device" /data || \
+				mount_data_device "$data_device" || \
 					printf '%s\n' 'qbtOS: unable to mount QBTOS_DATA' >&2
 			else
 				printf '%s\n' 'qbtOS: QBTOS_DATA filesystem not found' >&2

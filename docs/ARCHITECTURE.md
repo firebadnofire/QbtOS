@@ -9,7 +9,7 @@ B) as a read-only SquashFS root by PARTUUID. Buildroot's volatile `/run` and
 needed. MBR partition 4 is an extended container. Logical partition 5 is 512
 MiB: a 511 MiB ext4 filesystem labeled `QBTOS_STATE`, mounted at `/config`,
 plus a reserved boot-environment tail. The interactive imager can add logical
-partition 6 as a user-sized ext4 filesystem labeled `QBTOS_DATA`.
+partition 6 as a user-sized ext4 or NTFS filesystem labeled `QBTOS_DATA`.
 
 Early init finds configuration and optional data devices by inspecting block
 metadata for `QBTOS_STATE` (with legacy `QBTOS_CONFIG` compatibility) and the
@@ -18,10 +18,12 @@ device names while remaining compatible with the deliberately small userspace,
 whose mount command cannot resolve labels directly.
 
 `/config/qbtos` is an atomic state-generation symlink. It persists setup state,
-VPN material, TLS identity, manager
-authentication, and the qBittorrent profile/resume database. Torrent data must
-be on a mounted Linux filesystem under `/data`, `/media`, or `/mnt`; an ext4
-filesystem labeled `QBTOS_DATA` is automatically mounted at `/data`.
+VPN material, TLS identity, manager authentication, and the qBittorrent
+profile/resume database. Torrent data must be on a mounted writable filesystem
+under `/data`, `/media`, or `/mnt`; an ext4 or NTFS filesystem labeled
+`QBTOS_DATA` is automatically mounted at `/data`. NTFS uses the in-kernel NTFS3
+driver with ownership restricted to the qBittorrent account and Windows
+filename rules enabled.
 
 RAUC installs signed rootfs bundles only to the inactive slot. Two redundant
 raw U-Boot environment records in the reserved tail of the state partition
@@ -52,8 +54,9 @@ self-signed certificate. This is a minimum-valid-time seed, not a replacement
 for future network time synchronization.
 
 qBittorrent is built from source and runs as `qbtos-qbt`. nftables allows that
-UID to answer its port-8081 Web UI on private Ethernet ranges, but rejects its
-other traffic unless it exits `wg0` or `tun0`. The start gate also requires an
+UID to answer its TLS-protected port-8081 Web UI on private Ethernet ranges,
+using the same persistent certificate as the manager, but rejects its other
+traffic unless it exits `wg0` or `tun0`. The start gate also requires an
 installed marker, firewall table, up VPN interface, external IPv4 route through
 that interface, and a recent WireGuard handshake when applicable. A watchdog
 stops qBittorrent if those checks later fail.

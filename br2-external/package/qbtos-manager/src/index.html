@@ -63,7 +63,7 @@
 
     <section>
       <h2>Persistent data</h2>
-      <p>Use a mounted Linux filesystem. An ext4 device labeled <code>QBTOS_DATA</code> is mounted automatically at <code>/data</code>.</p>
+      <p>Use a mounted writable filesystem. An ext4 or NTFS device labeled <code>QBTOS_DATA</code> is mounted automatically at <code>/data</code>.</p>
       <label for="data_path">Download data directory</label>
       <input id="data_path" name="data_path" list="mounts" required value="/data">
       <datalist id="mounts"></datalist>
@@ -141,7 +141,7 @@
     document.querySelector('#mounts').innerHTML = status.mounts.filter(m => m.writable).map(m => `<option value="${escapeText(m.path)}">`).join('');
     document.querySelector('#diagnostics').innerHTML = status.diagnostics.map(item => `<li>${escapeText(item)}</li>`).join('');
     const link = document.querySelector('#qbt-link');
-    link.href = `http://${location.hostname}:8081`;
+    link.href = `https://${location.hostname}:8081`;
     link.hidden = !status.qbittorrent_running;
     const feed = update.feed_url || '';
     document.querySelector('#managed_update_feed_url').value = feed;

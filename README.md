@@ -58,9 +58,9 @@ sudo make imager
 Select the **whole SD-card device**, not a partition. The imager identifies
 external devices and devices larger than 100 GiB, asks for destructive
 confirmation, writes and verifies the image, and optionally allocates an ext4
-`QBTOS_DATA` partition in the card's remaining space. Enter `0` at the storage
-prompt if torrent data will live on a separately supplied USB or other ext4
-filesystem.
+or Windows-compatible NTFS `QBTOS_DATA` partition in the card's remaining
+space. Enter `0` at the storage prompt if torrent data will live on a separately
+supplied USB or other writable filesystem.
 
 Device selection can destroy all data on the selected disk. Read
 [docs/FLASHING.md](docs/FLASHING.md) before proceeding; it also documents a
@@ -80,10 +80,11 @@ manual `lsblk`/`dd`/`sync` workflow and generic imaging applications.
    OpenVPN configuration, select the data path, and test the VPN.
 7. Complete installation only when the manager reports active VPN protection.
 
-The manager links to qBittorrent's standard Web UI at
-`http://LAN-IP:8081`. Verify protection status before adding torrents. Detailed
-setup, diagnostics, and always-on 115200-baud GPIO UART instructions are in
-[docs/FIRST_BOOT.md](docs/FIRST_BOOT.md).
+The manager links to qBittorrent's standard HTTPS Web UI at
+`https://LAN-IP:8081`. It reuses the device certificate from port 8080, so the
+same development certificate warning is expected. Verify protection status
+before adding torrents. Detailed setup, diagnostics, and always-on 115200-baud
+GPIO UART instructions are in [docs/FIRST_BOOT.md](docs/FIRST_BOOT.md).
 
 ## QEMU development
 

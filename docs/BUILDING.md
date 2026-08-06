@@ -36,9 +36,12 @@ Consult the Buildroot manual's authoritative host requirements if a host check
 reports another missing tool.
 
 The optional interactive SD-card writer additionally needs `whiptail`,
-`lsblk`, `sfdisk`, `mkfs.ext4`, `dd`, and `sha256sum`. These are commonly
-provided by packages named `whiptail` or `newt`, `util-linux`, `e2fsprogs`, and
-`coreutils`, but names differ across distributions and releases.
+`lsblk`, `sfdisk`, `mkfs.ext4`, `dd`, and `sha256sum`. Selecting NTFS also
+requires `mkfs.ntfs`. These are commonly provided by packages named `whiptail`
+or `newt`, `util-linux`, `e2fsprogs`, `coreutils`, and `ntfs-3g`, but names
+differ across distributions and releases. Debian/Ubuntu and Fedora commonly
+call the NTFS package `ntfs-3g`; Gentoo commonly provides it as
+`sys-fs/ntfs3g`.
 
 ## Normal build
 
