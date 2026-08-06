@@ -14,3 +14,10 @@ CONFIG_CMD_SAVEENV=y
 CONFIG_BOOTDELAY=3
 # Keep fatal exceptions visible on the development UART instead of rebooting.
 CONFIG_PANIC_HANG=y
+# Reinitialize PL011 before driver-model serial so pre-relocation failures are
+# visible at the documented 115200 baud on Raspberry Pi 4 GPIO pins 14/15.
+CONFIG_DEBUG_UART=y
+CONFIG_DEBUG_UART_PL011=y
+CONFIG_DEBUG_UART_BASE=0xfe201000
+CONFIG_DEBUG_UART_CLOCK=48000000
+CONFIG_DEBUG_UART_ANNOUNCE=y

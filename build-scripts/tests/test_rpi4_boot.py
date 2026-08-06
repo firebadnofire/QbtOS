@@ -62,6 +62,11 @@ class RaspberryPiBootTests(unittest.TestCase):
         fragment = (BOARD / "uboot.fragment").read_text(encoding="utf-8")
 
         self.assertIn("CONFIG_PANIC_HANG=y", fragment)
+        self.assertIn("CONFIG_DEBUG_UART=y", fragment)
+        self.assertIn("CONFIG_DEBUG_UART_PL011=y", fragment)
+        self.assertIn("CONFIG_DEBUG_UART_BASE=0xfe201000", fragment)
+        self.assertIn("CONFIG_DEBUG_UART_CLOCK=48000000", fragment)
+        self.assertIn("CONFIG_DEBUG_UART_ANNOUNCE=y", fragment)
 
 
 if __name__ == "__main__":
