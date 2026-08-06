@@ -134,6 +134,17 @@ inspected, but it has not yet been reflashed and booted on hardware. The
 connected UART produced only NUL bytes from the old image, so it provided no
 readable firmware, U-Boot, or kernel trace.
 
+After reflashing that correction, the board still reset. Firmware-stage UART
+then proved that EEPROM and `start4.elf` completed, the device tree and
+`u-boot.bin` loaded, and execution transferred to ARM before the reset. The
+qbtOS default environment had replaced U-Boot's Raspberry Pi environment while
+omitting `stdin`, `stdout`, and `stderr`, despite
+`CONFIG_SYS_CONSOLE_IS_IN_ENV=y`; this hid all U-Boot diagnostics. The
+environment now routes all three streams to `serial`, restores U-Boot's standard
+Raspberry Pi memory variables, and leaves a failed kernel boot at the recovery
+prompt instead of resetting. A new image containing these changes has been
+built and inspected but remains to be reflashed and hardware-tested.
+
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted
 read-only; Ethernet obtained `192.168.86.65` by DHCP; and the manager returned

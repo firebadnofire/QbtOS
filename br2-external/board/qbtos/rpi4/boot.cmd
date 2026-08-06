@@ -39,4 +39,4 @@ setenv bootargs "${qbtos_bootargs} console=tty1 console=ttyAMA0,115200n8"
 booti ${kernel_addr_r} - ${fdt_addr}
 
 echo "qbtOS: selected slot failed before entering Linux"
-reset
+echo "qbtOS: automatic reset suppressed; use the U-Boot prompt for recovery"

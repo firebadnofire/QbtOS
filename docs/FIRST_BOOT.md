@@ -47,6 +47,11 @@ quiet boot. BusyBox init opens its login getty
 directly on `ttyAMA0` and respawns it whenever it exits, so the port remains
 available after boot as well as during kernel startup.
 
+U-Boot routes its input, output, and error streams to this serial port. If the
+selected kernel cannot start, qbtOS stops at the U-Boot recovery prompt instead
+of repeatedly resetting. Run `reset` at the prompt only after recording the
+failure and correcting the boot environment or SD-card contents.
+
 Use a **3.3-volt TTL** USB serial adapter, never an RS-232-level adapter. Connect
 Pi GPIO pin 8 (TX) to adapter RX, pin 10 (RX) to adapter TX, and a Pi ground
 (for example pin 6) to adapter ground. A common ground is required. Do not

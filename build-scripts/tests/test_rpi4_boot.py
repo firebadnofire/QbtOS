@@ -30,6 +30,21 @@ class RaspberryPiBootTests(unittest.TestCase):
         self.assertEqual(script_address, 0x05400000)
         self.assertGreaterEqual(script_address, 0x02400000)
 
+    def test_headless_uboot_console_is_routed_to_uart(self):
+        values = environment()
+
+        self.assertEqual(values["stdin"], "serial")
+        self.assertEqual(values["stdout"], "serial")
+        self.assertEqual(values["stderr"], "serial")
+
+    def test_kernel_failure_stops_at_recovery_prompt(self):
+        boot_script = (BOARD / "boot.cmd").read_text(encoding="utf-8")
+
+        failure = boot_script.split(
+            'echo "qbtOS: selected slot failed before entering Linux"', 1)[1]
+        self.assertNotIn("\nreset\n", failure)
+        self.assertIn("automatic reset suppressed", failure)
+
     def test_uart_is_enabled_during_firmware_and_later_stages(self):
         config = (BOARD / "config.txt").read_text(encoding="utf-8")
         command_line = (BOARD / "cmdline.txt").read_text(encoding="utf-8")
@@ -37,6 +52,7 @@ class RaspberryPiBootTests(unittest.TestCase):
 
         self.assertIn("enable_uart=1", config)
         self.assertIn("uart_2ndstage=1", config)
+        self.assertIn("enable_gic=1", config)
         self.assertIn("dtoverlay=disable-bt", config)
         self.assertIn("console=ttyAMA0,115200n8", command_line)
         self.assertIn("console=ttyAMA0,115200n8", boot_script)

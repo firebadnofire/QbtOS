@@ -2,6 +2,7 @@ start_file=start4.elf
 fixup_file=fixup4.dat
 kernel=u-boot.bin
 arm_64bit=1
+enable_gic=1
 disable_overscan=1
 gpu_mem=16
 
