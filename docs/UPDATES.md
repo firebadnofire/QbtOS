@@ -3,10 +3,12 @@
 ## Trust and partition layout
 
 Raspberry Pi releases use an MBR image with a 64 MiB `QBTOS_BOOT` FAT
-partition, 96 MiB read-only SquashFS slots A and B, and a 512 MiB writable
-`QBTOS_STATE` ext4 partition. Torrent payloads remain on a separate
-user-selected filesystem. The fixed image disk signature gives the slots stable
-PARTUUIDs ending in `-02` and `-03`; RAUC never targets the active slot.
+partition, 96 MiB read-only SquashFS slots A and B, and an extended partition
+containing the 512 MiB writable `QBTOS_STATE` ext4 logical partition. The
+interactive imager may append `QBTOS_DATA` as a second logical partition;
+otherwise torrent payloads remain on a separate user-selected filesystem. The
+fixed image disk signature gives the system slots stable PARTUUIDs ending in
+`-02` and `-03`; RAUC never targets the active slot.
 
 The state partition is 512 MiB; its ext4 filesystem occupies the first 511 MiB.
 U-Boot stores two redundant, CRC-protected 16 KiB environment records in the

@@ -1,47 +1,119 @@
 # qbtOS
 
-qbtOS is a development-stage, Buildroot-based Raspberry Pi 4 appliance for
-running qBittorrent through WireGuard or OpenVPN, with amd64 and arm64 QEMU
-targets for development. Its design goals and future scope are described in
-[VISION.md](VISION.md).
+qbtOS is a development-stage, Buildroot-based appliance for running
+qBittorrent behind WireGuard or OpenVPN. The primary target is a 64-bit
+Raspberry Pi 4 Model B with wired Ethernet; amd64 and arm64 QEMU targets are
+provided for development. See [VISION.md](VISION.md) for the longer-term goals.
 
-## Build an image
+qbtOS uses a read-only SquashFS system with A/B slots, a writable state
+partition, and separate torrent-data storage. A small HTTPS management service
+handles first-time setup and reports VPN, firewall, qBittorrent, storage, and
+update status. qBittorrent remains stopped unless setup is complete and the
+VPN traffic-lock checks pass.
+
+> **Development warning:** qbtOS has not been certified for privacy or
+> anonymity. The fail-closed design has been exercised in QEMU, but disconnect,
+> DNS, update/rollback, and leak testing on Raspberry Pi hardware remain release
+> requirements.
+
+## Clone and build
+
+Use a current 64-bit Linux host with a case-sensitive filesystem, network
+access, and approximately 20–30 GiB of available disk space. Distribution
+package examples and the authoritative tool list are in
+[docs/BUILDING.md](docs/BUILDING.md).
 
 ```bash
-git clone --recurse-submodules REPOSITORY_URL
+git clone --recurse-submodules \
+  https://pubcode.archuser.org/firebadnofire/qbtOS.git
 cd qbtOS
-./build-scripts/build.sh
+make configure
+make build
 ```
 
-The raw SD-card image is written to `output/images/sdcard.img`. See
-[docs/BUILDING.md](docs/BUILDING.md), [docs/FLASHING.md](docs/FLASHING.md), and
-[docs/FIRST_BOOT.md](docs/FIRST_BOOT.md) before using it. Host-side verification
-results are recorded in [docs/VALIDATION.md](docs/VALIDATION.md). Signed
-Raspberry Pi A/B release and recovery procedures are in
-[docs/UPDATES.md](docs/UPDATES.md).
+For an existing checkout, initialize the pinned Buildroot submodule first:
 
-The equivalent two-step Make interface is `make configure && make build`.
-After building, run `make imager` to select a whole block device in a terminal
-UI and optionally allocate an on-card ext4 `QBTOS_DATA` storage partition.
+```bash
+git submodule update --init --recursive
+```
 
-Build and run an amd64 or arm64 QEMU appliance with:
+The build produces the SD-card-ready raw image:
+
+```text
+output/images/sdcard.img
+```
+
+Routine builds use the checked-in defconfig and do not require `menuconfig`.
+Use `make rebuild` for a clean target rebuild or `make distclean` followed by
+the two build commands for a completely fresh output tree.
+
+## Write the SD card
+
+The recommended writer is the repository's interactive terminal imager:
+
+```bash
+sudo make imager
+```
+
+Select the **whole SD-card device**, not a partition. The imager identifies
+external devices and devices larger than 100 GiB, asks for destructive
+confirmation, writes and verifies the image, and optionally allocates an ext4
+`QBTOS_DATA` partition in the card's remaining space. Enter `0` at the storage
+prompt if torrent data will live on a separately supplied USB or other ext4
+filesystem.
+
+Device selection can destroy all data on the selected disk. Read
+[docs/FLASHING.md](docs/FLASHING.md) before proceeding; it also documents a
+manual `lsblk`/`dd`/`sync` workflow and generic imaging applications.
+
+## Boot and complete setup
+
+1. Connect the Raspberry Pi 4 to a trusted LAN using Ethernet.
+2. Attach writable data storage unless the imager created `QBTOS_DATA` on the
+   SD card.
+3. Insert the card and power on the Pi.
+4. Find the `qbtos` DHCP lease in the router's client list.
+5. Open `https://LAN-IP:8080` and accept the expected development certificate
+   warning after verifying the device address. The `https://` scheme is
+   required; plaintext HTTP is not exposed on this port.
+6. Set the qBittorrent administrator credentials, provide a WireGuard or
+   OpenVPN configuration, select the data path, and test the VPN.
+7. Complete installation only when the manager reports active VPN protection.
+
+The manager links to qBittorrent's standard Web UI at
+`http://LAN-IP:8081`. Verify protection status before adding torrents. Detailed
+setup, diagnostics, and always-on 115200-baud GPIO UART instructions are in
+[docs/FIRST_BOOT.md](docs/FIRST_BOOT.md).
+
+## QEMU development
+
+Build a QCOW2 appliance and a separate sparse data disk with:
 
 ```bash
 ./build-scripts/build.sh --format qcow --arch amd64 --size 16
 ./build-scripts/run-qemu.sh --arch amd64
 ```
 
-The management interface is then available at `https://127.0.0.1:8080`. See
-[docs/QEMU.md](docs/QEMU.md) for artifacts, persistent runtime storage, port
-forwarding, and cross-architecture emulation.
+Use `--arch arm64` for the arm64 guest. The default forwarded management URL is
+`https://127.0.0.1:8080`. See [docs/QEMU.md](docs/QEMU.md) for dependencies,
+artifacts, networking, persistent overlays, and cross-architecture emulation.
 
-> **Development warning:** this first image has not been certified for privacy
-> or anonymity. qBittorrent stays disabled until setup and VPN protection checks
-> pass, but physical Raspberry Pi leak testing is still required.
+## Development and release references
 
-Original qbtOS software is licensed under the GNU General Public License
-version 3 or later. Distribution components retain their own licenses; consult
-their copyright files and the generated Buildroot legal information.
+- [Building](docs/BUILDING.md): host packages, clean builds, logs, QEMU, and
+  signed release commands.
+- [Architecture](docs/ARCHITECTURE.md): boot chain, partitions, persistence,
+  services, and security boundaries.
+- [Signed updates](docs/UPDATES.md): revision tags, RAUC/U-Boot A/B operation,
+  signing, rollback, and recovery.
+- [Validation status](docs/VALIDATION.md): what has been tested and what still
+  requires Raspberry Pi hardware.
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md): milestone scope and
+  remaining work.
+- [Contributor guide](AGENTS.md): repository layout, conventions, and checks.
 
-qBittorrent is a file-sharing program. Active torrents may upload data to other
-peers. Users are responsible for the content they download, possess, and share.
+Run `make check` before submitting changes. Buildroot license materials can be
+generated after a successful build with `make legal-info`. Original qbtOS code
+is licensed under GPL-3.0-or-later; bundled components retain their own
+licenses. qBittorrent may upload data to peers, and users are responsible for
+the content they download, possess, and share.

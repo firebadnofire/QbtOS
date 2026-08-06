@@ -38,16 +38,18 @@ hardware and against disconnect, route-change, DNS, and reboot scenarios.
 
 ## Current status
 
-The original image path, manager tests, Buildroot metadata checks, filesystem
-contents, and raw partition payloads were validated on a Linux build host. A
-Raspberry Pi 4 boot, serial login, DHCP, and HTTPS manager response have also
-been confirmed. The new A/B update image still needs host artifact inspection
-and a physical reflash; rollback and VPN leak testing remain open. amd64 and
-arm64 QEMU guests boot to the working HTTPS setup interface; see `VALIDATION.md`.
+The image path, manager tests, Buildroot metadata, filesystem contents, raw
+partition payloads, A/B environment, and optional imager-created data partition
+were validated on a Linux build host. A Raspberry Pi 4 has booted slot A through
+U-Boot to serial login, DHCP, and the HTTPS manager. The latest extended-layout
+image still needs a physical reflash, and signed inactive-slot installation,
+fallback, state survival, and exhaustive VPN leak testing remain open. amd64
+and arm64 QEMU guests boot to the HTTPS setup interface; see `VALIDATION.md`.
 
 ## Deferred work
 
 - Automated USB/FAT configuration import and general removable-media mounting
-- Wi-Fi, Raspberry Pi 5, transactional FAT/kernel updates, and OTA publishing
+- Wi-Fi, Raspberry Pi 5, and transactional FAT/kernel updates
+- Successful production-signed Forgejo publication and feed deployment
 - Production PKI, hardened privilege separation, and browser-trusted TLS
 - Provider-specific VPN behavior and exhaustive network-namespace leak tests

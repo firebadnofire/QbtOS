@@ -1,23 +1,25 @@
 # Development Image Validation
 
-## Signed A/B milestone (2026-08-03)
+## Current development image (2026-08-06)
 
-The final Raspberry Pi development artifact is
-`output/images/sdcard.img` (806,354,944 bytes) with SHA-256:
+The latest locally built Raspberry Pi artifact is
+`output/images/sdcard.img` (807,403,520 bytes) with SHA-256:
 
 ```text
-a72efa6b048bf6eccbca967da39c7ba9a63091131f74f66cd12d5e01bda1beb6
+d2f53fda22ba6ea0971d8cfdeaf2ececb208edea480ab40eaba5b1013efe3e9a
 ```
 
-It was regenerated after the live VM findings from the clean Buildroot base.
-`fdisk` and `partx` report disk signature `0x5142544f` and the expected 64 MiB
-FAT boot, 96 MiB slot A, 96 MiB slot B, and 512 MiB logical state partitions with
-PARTUUIDs `5142544f-01` through `-04`. Byte comparisons matched the boot image,
-both SquashFS slots, the 511 MiB state filesystem, and both 16 KiB redundant
-U-Boot environment records. `fw_printenv` read `BOOT_ORDER=A B` and three
-attempts for each slot. The state filesystem passes read-only `e2fsck`.
+The digest identifies this build, not a reproducible-build guarantee: ext4
+UUIDs and timestamps can make separate builds byte-different. `fdisk` and
+`partx` report disk signature `0x5142544f`, a 64 MiB FAT boot partition, 96 MiB
+slots A and B, and a 513 MiB extended partition containing the 512 MiB logical
+state partition as partition 5. Byte comparisons matched the boot image, both
+SquashFS slots, and state filesystem. The redundant U-Boot environment records
+remain in the reserved state-partition tail; `fw_printenv` reads `BOOT_ORDER=A
+B` and three attempts for each slot. The state filesystem passes read-only
+`e2fsck`.
 
-The final SquashFS is XZ-compressed and contains RAUC, GPGV, qBittorrent-nox,
+The current SquashFS is XZ-compressed and contains RAUC, GPGV, qBittorrent-nox,
 WireGuard/OpenVPN tools, the manager/update/migration/confirmation services,
 BusyBox `stat`, and the traffic lock. The FAT image contains U-Boot and a boot
 script that selects the root by PARTUUID. It retains `enable_uart=1`,
@@ -61,14 +63,19 @@ documented Buildroot/toolchain source warnings.
 
 ### Remaining acceptance boundary
 
-The new U-Boot/RAUC A/B image has **not** been booted on Raspberry Pi hardware.
-No reachable `revision-N` tag or release RAUC signing inputs were available, so
-an end-to-end production `make release` was not run. Artifact naming,
-deterministic manifest generation, four-file enforcement, OpenPGP checksum
-verification, downgrade rejection, inactive-slot selection, state migration,
-and fallback logic are covered by host tests. Hardware still must demonstrate
-slot-A boot, signed install to inactive B, three-failure fallback, healthy-B
-confirmation, and state survival across update and rollback.
+A preceding A/B image booted slot A through U-Boot on a Raspberry Pi 4, mounted
+the SquashFS root read-only and state ext4 read/write, obtained DHCP, and served
+the manager over HTTPS. The current image changes the partition container so
+the imager can append logical `QBTOS_DATA`; it has been inspected on the host
+but has **not** yet been reflashed and booted on hardware.
+
+No end-to-end production `make release` has completed with the production RAUC
+inputs. Artifact naming, deterministic manifest creation, four-file
+enforcement, OpenPGP checksum verification, downgrade rejection, inactive-slot
+selection, state migration, and fallback logic are covered by host tests.
+Hardware still must demonstrate signed installation to inactive B,
+three-failure fallback, healthy-B confirmation, and state/configuration survival
+across update and rollback.
 
 ## Historical initial image validation
 

@@ -1,8 +1,9 @@
 # First Boot
 
 1. Connect the Raspberry Pi 4 to the trusted LAN with Ethernet.
-2. Connect a writable ext4 data device. For automatic mounting, label it
-   `QBTOS_DATA`; qbtOS mounts that filesystem at `/data`.
+2. If the interactive imager did not create an on-card `QBTOS_DATA` partition,
+   connect a writable ext4 data device with that label. qbtOS mounts the labeled
+   filesystem at `/data`.
 3. Insert the flashed SD card and power on the Pi.
 4. Find the `qbtos` DHCP lease in the router, or inspect the router's client
    list. `qbtos.local` may work on some networks but is not assumed.

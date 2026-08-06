@@ -35,13 +35,19 @@ sudo emerge --ask sys-devel/gcc sys-devel/make dev-vcs/git net-misc/rsync \
 Consult the Buildroot manual's authoritative host requirements if a host check
 reports another missing tool.
 
+The optional interactive SD-card writer additionally needs `whiptail`,
+`lsblk`, `sfdisk`, `mkfs.ext4`, `dd`, and `sha256sum`. These are commonly
+provided by packages named `whiptail` or `newt`, `util-linux`, `e2fsprogs`, and
+`coreutils`, but names differ across distributions and releases.
+
 ## Normal build
 
 Buildroot is pinned as a Git submodule at release `2026.05.1`.
 
 ```bash
 git submodule update --init --recursive
-./build-scripts/build.sh
+make configure
+make build
 ```
 
 The default `flat` format loads `br2-external/configs/qbtos_rpi4_defconfig`;
@@ -53,7 +59,8 @@ components, then prints the image path and SHA-256 digest:
 output/images/sdcard.img
 ```
 
-Capture a searchable build log with:
+The one-command equivalent is `./build-scripts/build.sh`. Capture a searchable
+build log with:
 
 ```bash
 ./build-scripts/build.sh 2>&1 | tee .build-log-qbtos

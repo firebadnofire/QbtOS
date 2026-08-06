@@ -13,14 +13,17 @@ shows every whole block device. Removable or hot-plug devices carry an
 `(external)` tag; devices larger than 100 GiB carry a `(large device)` tag.
 These are warnings, not selection filters.
 
-After device selection, enter an integer number of GiB for an on-card
+Run the imager as root (for example, `sudo make imager`) when your account
+cannot write the selected block device. After device selection, enter an
+integer number of GiB for an on-card
 `QBTOS_DATA` ext4 filesystem. qbtOS automatically mounts it at `/data`. Enter
 `0` to leave the remaining card space unallocated and provide a separately
 labeled USB or other writable data filesystem. The imager displays a final
 destructive confirmation before unmounting the target and writing it. A custom
 image path can be supplied with `build-scripts/imager.sh --image PATH`.
 
-> **DANGER: `dd` overwrites the selected device without confirmation. Choosing
+> **DANGER: the manual `dd` command below overwrites the selected device without
+> confirmation. Choosing
 > a system disk destroys its partition table and data. Verify the whole-device
 > path by model, size, and removable flag. Do not use a partition such as
 > `/dev/sdX1`.**
