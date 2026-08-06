@@ -21,3 +21,7 @@ CONFIG_DEBUG_UART_PL011=y
 CONFIG_DEBUG_UART_BASE=0xfe201000
 CONFIG_DEBUG_UART_CLOCK=48000000
 CONFIG_DEBUG_UART_ANNOUNCE=y
+# qbtOS uses its explicit A/B boot script, not UEFI. Keeping EFI enabled also
+# makes pre-relocation exception recovery consult state that is not initialized
+# until BSS relocation on this platform.
+CONFIG_EFI_LOADER=n

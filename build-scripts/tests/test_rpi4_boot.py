@@ -70,6 +70,7 @@ class RaspberryPiBootTests(unittest.TestCase):
         self.assertIn("CONFIG_DEBUG_UART_BASE=0xfe201000", fragment)
         self.assertIn("CONFIG_DEBUG_UART_CLOCK=48000000", fragment)
         self.assertIn("CONFIG_DEBUG_UART_ANNOUNCE=y", fragment)
+        self.assertIn("CONFIG_EFI_LOADER=n", fragment)
         self.assertIn('printascii("[init] " #_call', trace_patch)
         self.assertIn("GD_FLG_HAVE_CONSOLE", trace_patch)
 
