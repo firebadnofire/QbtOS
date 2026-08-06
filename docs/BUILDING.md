@@ -57,7 +57,13 @@ components, then prints the image path and SHA-256 digest:
 
 ```text
 output/images/sdcard.img
+output/images/sdcard.img.sha256
 ```
+
+The checksum sidecar is refreshed after every successful flat-image build. The
+interactive imager uses it to verify the written image without reading the
+large source image a second time; stale or malformed sidecars are ignored in
+favor of a byte comparison.
 
 The one-command equivalent is `./build-scripts/build.sh`. Capture a searchable
 build log with:

@@ -222,6 +222,48 @@ refresh_partition_table() {
 	die "kernel could not refresh ${device}; disconnect and reconnect it, inspect partition 6 with lsblk, then create QBTOS_DATA manually"
 }
 
+cached_image_sha256() {
+	local image=$1
+	local checksum_file="${image}.sha256"
+	local digest remainder
+	local -a checksum_lines
+
+	[[ -r "$checksum_file" ]] || return 1
+	if [[ "$image" -nt "$checksum_file" ]]; then
+		printf 'Ignoring stale checksum cache: %s\n' "$checksum_file" >&2
+		return 1
+	fi
+	mapfile -t checksum_lines < "$checksum_file"
+	if ((${#checksum_lines[@]} != 1)); then
+		printf 'Ignoring invalid checksum cache: %s\n' "$checksum_file" >&2
+		return 1
+	fi
+	IFS=' ' read -r digest remainder <<< "${checksum_lines[0]}"
+	[[ "$digest" =~ ^[[:xdigit:]]{64}$ ]] || {
+		printf 'Ignoring invalid checksum cache: %s\n' "$checksum_file" >&2
+		return 1
+	}
+	printf '%s\n' "${digest,,}"
+}
+
+verify_written_image() {
+	local device=$1
+	local image=$2
+	local image_bytes=$3
+	local expected actual
+
+	if expected=$(cached_image_sha256 "$image"); then
+		printf 'Using cached SHA-256 from %s.sha256...\n' "$image"
+		actual=$(dd if="$device" bs=4M iflag=count_bytes \
+			count="$image_bytes" status=none | sha256sum | awk '{print $1}')
+		[[ "$actual" == "$expected" ]] || die \
+			"written image checksum mismatch: expected ${expected}, got ${actual}"
+	else
+		printf '%s\n' "No current checksum cache; using byte comparison..."
+		cmp --bytes="$image_bytes" "$image" "$device"
+	fi
+}
+
 extend_for_data_partition() {
 	local device=$1
 	local data_gib=$2
@@ -268,7 +310,7 @@ main() {
 	[[ -f "$image_path" && -s "$image_path" ]] || die \
 		"image is missing or empty: ${image_path}"
 
-	for command_name in whiptail lsblk numfmt realpath blockdev dd cmp sfdisk \
+	for command_name in whiptail lsblk numfmt realpath blockdev dd cmp sha256sum sfdisk \
 		awk grep sed stat tr sleep umount mkfs.ext4 sync; do
 		require_command "$command_name"
 	done
@@ -307,7 +349,7 @@ main() {
 	printf 'Writing %s to %s...\n' "$image_path" "$selected_device"
 	dd if="$image_path" of="$selected_device" bs=4M status=progress conv=fsync
 	printf '%s\n' "Verifying the written OS image..."
-	cmp --bytes="$image_bytes" "$image_path" "$selected_device"
+	verify_written_image "$selected_device" "$image_path" "$image_bytes"
 	if ((data_gib > 0)); then
 		printf 'Creating %s GiB QBTOS_DATA filesystem...\n' "$data_gib"
 		extend_for_data_partition "$selected_device" "$data_gib"

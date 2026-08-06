@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -59,6 +60,37 @@ class ImagerTests(unittest.TestCase):
             'refresh_partition_table "$selected_device"'
         )
         self.assertGreater(first_refresh, extend_call)
+
+    def test_cached_checksum_verifies_written_prefix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            image = directory / "sdcard.img"
+            device = directory / "device"
+            payload = b"qbtOS image payload\n" * 128
+            image.write_bytes(payload)
+            device.write_bytes(payload + b"unallocated trailing space")
+            checksum = subprocess.run(
+                ["sha256sum", image.name],
+                cwd=directory,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            ).stdout
+            cache = directory / "sdcard.img.sha256"
+            cache.write_text(checksum, encoding="utf-8")
+            timestamp = max(image.stat().st_mtime, cache.stat().st_mtime)
+            os.utime(image, (timestamp, timestamp))
+            os.utime(cache, (timestamp, timestamp))
+
+            output = bash(
+                f'verify_written_image "{device}" "{image}" {len(payload)}'
+            )
+
+        self.assertIn("Using cached SHA-256", output)
+
+    def test_build_creates_sd_image_checksum_cache(self):
+        source = (REPO / "build-scripts/build.sh").read_text(encoding="utf-8")
+        self.assertIn("sha256sum sdcard.img > sdcard.img.sha256", source)
 
     def test_image_reserves_an_extended_partition_for_data(self):
         genimage = (

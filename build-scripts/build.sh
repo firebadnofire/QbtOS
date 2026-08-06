@@ -209,8 +209,12 @@ if [[ "$format" == "flat" ]]; then
 	[[ "$(stat -c %s "${output_dir}/images/sdcard.img")" -eq $((0x30200000)) ]] || {
 		printf 'SD image does not reach its declared partition-table end: %s\n' \
 			"${output_dir}/images/sdcard.img" >&2
-		exit 1
+			exit 1
 	}
+	(
+		cd "${output_dir}/images"
+		sha256sum sdcard.img > sdcard.img.sha256
+	)
 	artifacts=("${output_dir}/images/sdcard.img")
 else
 	if [[ "$arch" == "amd64" ]]; then

@@ -21,6 +21,9 @@ integer number of GiB for an on-card
 labeled USB or other writable data filesystem. The imager displays a final
 destructive confirmation before unmounting the target and writing it. A custom
 image path can be supplied with `build-scripts/imager.sh --image PATH`.
+When a current `PATH.sha256` sidecar is present, verification hashes the written
+OS-sized portion of the device and compares it with the cached digest. Otherwise
+the imager falls back to a direct byte comparison.
 
 Desktop automounters may briefly reopen a partition while the imager updates
 the table. The imager unmounts such filesystems and retries the refresh. If it
