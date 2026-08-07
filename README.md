@@ -118,3 +118,13 @@ generated after a successful build with `make legal-info`. Original qbtOS code
 is licensed under GPL-3.0-or-later; bundled components retain their own
 licenses. qBittorrent may upload data to peers, and users are responsible for
 the content they download, possess, and share.
+
+## Credits
+
+Argon ONE case power-button and fan-control scripts are developed and
+distributed by [Argon 40](https://www.argon40.com/). The source evaluated for
+qbtOS is preserved by the
+[Argon40-ArgonOne-Script project](https://github.com/okunze/Argon40-ArgonOne-Script).
+The scripts and Argon branding remain the property of their respective owners;
+qbtOS is an independent project and is not affiliated with or endorsed by
+Argon 40.
