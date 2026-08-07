@@ -16,10 +16,11 @@
    protection. Verify status again before adding any torrent.
 
 The management page shows the LAN address, selected path, protection result,
-qBittorrent state, and basic diagnostics. Once running, it links to the standard
-qBittorrent Web UI on `https://LAN-IP:8081`. Port 8081 reuses the locally
-generated certificate from port 8080, so the same certificate warning is
-expected. The setup credentials protect both interfaces. qBittorrent remains
+qBittorrent state, and basic diagnostics. Successful installation redirects to
+the standard qBittorrent Web UI on `https://LAN-IP:8081`; the same link remains
+available from management status. Port 8081 reuses the locally generated
+certificate from port 8080, so the same certificate warning is expected. Sign
+in with the qBittorrent credentials entered during setup. qBittorrent remains
 stopped when protection checks fail.
 
 The status page also reports the qbtOS version, active and inactive system

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>qbtOS setup</title>
   <style>
     :root { color-scheme: dark; font: 16px/1.45 system-ui, sans-serif; }
@@ -29,7 +30,8 @@
   <section>
     <h2>System status</h2>
     <dl id="status"><dt>Loading…</dt></dl>
-    <p><a id="qbt-link" href="#" hidden>Open the qBittorrent Web UI</a></p>
+    <p><a id="qbt-link" href="#" rel="noreferrer noopener"
+          referrerpolicy="no-referrer" hidden>Open the qBittorrent Web UI</a></p>
     <ul id="diagnostics"></ul>
   </section>
 
@@ -104,6 +106,9 @@
   function payload() {
     return Object.fromEntries(new FormData(form).entries());
   }
+  function qbtUrl() {
+    return `https://${location.hostname}:8081/`;
+  }
   async function submit(path) {
     message.className = '';
     message.textContent = 'Working… qBittorrent remains stopped until all checks pass.';
@@ -112,8 +117,10 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Request failed');
       message.className = 'good';
-      message.textContent = path.endsWith('complete') ? 'Installation complete. Sign in again when prompted.' : 'VPN route and protection checks passed.';
+      const completed = path === '/api/complete';
+      message.textContent = completed ? 'Installation complete. Opening qBittorrent…' : 'VPN route and protection checks passed.';
       render(result.status);
+      if (completed) window.location.replace(qbtUrl());
     } catch (error) {
       message.className = 'bad';
       message.textContent = error.message;
@@ -141,7 +148,7 @@
     document.querySelector('#mounts').innerHTML = status.mounts.filter(m => m.writable).map(m => `<option value="${escapeText(m.path)}">`).join('');
     document.querySelector('#diagnostics').innerHTML = status.diagnostics.map(item => `<li>${escapeText(item)}</li>`).join('');
     const link = document.querySelector('#qbt-link');
-    link.href = `https://${location.hostname}:8081`;
+    link.href = qbtUrl();
     link.hidden = !status.qbittorrent_running;
     const feed = update.feed_url || '';
     document.querySelector('#managed_update_feed_url').value = feed;

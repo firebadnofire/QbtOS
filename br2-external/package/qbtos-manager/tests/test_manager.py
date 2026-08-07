@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 MODULE_PATH = Path(__file__).parents[1] / "src/qbtos_manager.py"
+INDEX_PATH = MODULE_PATH.with_name("index.html")
 sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("qbtos_manager", MODULE_PATH)
 manager = importlib.util.module_from_spec(SPEC)
@@ -15,6 +16,22 @@ SPEC.loader.exec_module(manager)
 
 
 class ValidationTests(unittest.TestCase):
+    def test_qbittorrent_navigation_suppresses_cross_origin_referrer(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+        source = MODULE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('<meta name="referrer" content="no-referrer">', page)
+        self.assertIn('referrerpolicy="no-referrer"', page)
+        self.assertIn('rel="noreferrer noopener"', page)
+        self.assertIn('"Referrer-Policy", "no-referrer"', source)
+
+    def test_successful_install_redirects_to_qbittorrent(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("path === '/api/complete'", page)
+        self.assertIn("window.location.replace(qbtUrl())", page)
+        self.assertIn("https://${location.hostname}:8081/", page)
+
     def test_password_hash_round_trip(self):
         encoded = manager.password_hash("correct horse battery staple", salt=b"0" * 16)
         self.assertTrue(manager.verify_password(encoded, "correct horse battery staple"))

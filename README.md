@@ -80,7 +80,7 @@ manual `lsblk`/`dd`/`sync` workflow and generic imaging applications.
    OpenVPN configuration, select the data path, and test the VPN.
 7. Complete installation only when the manager reports active VPN protection.
 
-The manager links to qBittorrent's standard HTTPS Web UI at
+Successful installation redirects to qBittorrent's standard HTTPS Web UI at
 `https://LAN-IP:8081`. It reuses the device certificate from port 8080, so the
 same development certificate warning is expected. Verify protection status
 before adding torrents. Detailed setup, diagnostics, and always-on 115200-baud
