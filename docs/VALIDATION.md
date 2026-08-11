@@ -1,12 +1,12 @@
 # Development Image Validation
 
-## Current development image (2026-08-06)
+## Current development image (2026-08-11)
 
 The latest locally built Raspberry Pi artifact is
 `output/images/sdcard.img` (807,403,520 bytes) with SHA-256:
 
 ```text
-d2f53fda22ba6ea0971d8cfdeaf2ececb208edea480ab40eaba5b1013efe3e9a
+7fab1127eedfa12e360973ff92f6a40cdad0aa36c529f8f827458aab29dfe003
 ```
 
 The digest identifies this build, not a reproducible-build guarantee: ext4
@@ -20,14 +20,69 @@ B` and three attempts for each slot. The state filesystem passes read-only
 `e2fsck`.
 
 The current SquashFS is XZ-compressed and contains RAUC, GPGV, qBittorrent-nox,
-WireGuard/OpenVPN tools, the manager/update/migration/confirmation services,
-BusyBox `stat`, and the traffic lock. The FAT image contains U-Boot and a boot
-script that selects the root by PARTUUID. It retains `enable_uart=1`,
+WireGuard/OpenVPN tools, curl, the manager/update/migration/confirmation
+services, BusyBox `stat`, TLS-enabled Git HTTPS transport, the Rust Argon40
+daemon and control tools, and the traffic lock. The FAT image contains U-Boot
+and a boot script that selects the root by PARTUUID. It retains `enable_uart=1`,
 `dtoverlay=disable-bt`, `console=ttyAMA0,115200n8`, and the respawning serial
 getty. Production RAUC and OpenPGP public keys are intentionally absent from a
 normal development image.
 
 ### Live amd64 QEMU and cloud-init test
+
+On 2026-08-10, an incremental amd64 QCOW rebuild booted as a fresh KVM guest.
+The manager completed setup with the supplied WireGuard fixture, reported both
+state and data filesystems writable, and started qBittorrent. All three new
+service operations (stop, start, and restart) returned success and matching
+process status. After a guest reboot, the state partition retained the
+installation and credentials, WireGuard was restored before qBittorrent, and
+the API again reported the data filesystem ready and qBittorrent running. The
+temporary guest copies and request files containing the test VPN were removed.
+The test did not write the torrent fixture or download payload data.
+
+A subsequent fresh amd64 QEMU boot installed VueTorrent directly from its
+public HTTPS repository's `latest-release` branch. The manager detected
+`public/index.html`, reported the checkout as Git-managed, and retained the
+requested branch. This exposed and fixed a Buildroot dependency issue where Git
+was present without its libcurl-backed `remote-https` helper. SquashFS
+inspection confirms that the rebuilt Raspberry Pi image contains both
+`git-remote-http` and `git-remote-https`.
+
+On 2026-08-11, UART from the then-current flashed Raspberry Pi confirmed that both
+persistent partitions remounted read/write after reboot and that the saved
+installation, VPN profile, qBittorrent configuration, and data path were
+detected. DHCP installed the expected address and default route, but the saved
+WireGuard tunnel produced no accepted handshake during the protection window;
+qBittorrent correctly remained stopped. A manual retry of the same persisted
+profile succeeded without configuration changes, passed the interface, route,
+firewall, and handshake checks, and allowed qBittorrent to start.
+
+The boot-only cause was clock rollback rather than lost state, DNS, routing, or
+provider configuration. The numeric VPN endpoint excluded DNS. This Pi has no
+RTC: the reboot reset its clock to image epoch `1786471411`, no persistent clock
+floor existed, and the peer initially rejected the older WireGuard handshake
+timestamp as replayed state. Once the clock advanced, a handshake succeeded at
+epoch `1786471636`. qbtOS now saves a monotonic clock floor immediately after
+VPN protection succeeds and during orderly shutdown, then restores it before
+network services on the next boot. The manager also exposes an authenticated
+explicit VPN retry that starts qBittorrent only after protection passes. These
+follow-up changes have host coverage and are present in the latest locally
+built image, but that image has not yet been flashed and reboot-tested.
+
+An earlier UART session exposed the Python Argon daemon aborting because its
+legacy RPi.GPIO backend rejected this Buildroot userspace. It has been replaced
+by the Rust implementation pinned as the `argon40-rust/source` Git submodule.
+Buildroot cross-compiled and installed `argon40d`, `argon40ctl`, and
+`argon40-shutdown` for aarch64. Actual fan response, service lifecycle, and
+physical power-button behavior still require hardware validation of this image.
+
+`make check` processed 3,989 external-tree lines without warnings and passed 46
+manager tests plus 25 build/release/imager/boot tests. An incremental Buildroot
+build produced the current Raspberry Pi image; its cached checksum passed,
+`fdisk` confirmed the expected five-partition A/B layout, and SquashFS
+inspection confirmed curl, the Rust Argon tools, the DHCP gate, persistence,
+manager, VPN restore, and qBittorrent services. This does not replace a clean
+signed release build or a Raspberry Pi reboot test of the new image.
 
 `build-scripts/build.sh --format qcow --arch amd64 --size 16` completed from a
 clean QEMU output directory. Both QCOW2 files pass `qemu-img check`; the data
@@ -64,10 +119,11 @@ documented Buildroot/toolchain source warnings.
 ### Remaining acceptance boundary
 
 A preceding A/B image booted slot A through U-Boot on a Raspberry Pi 4, mounted
-the SquashFS root read-only and state ext4 read/write, obtained DHCP, and served
-the manager over HTTPS. The current image changes the partition container so
-the imager can append logical `QBTOS_DATA`; it has been inspected on the host
-but has **not** yet been reflashed and booted on hardware.
+the SquashFS root read-only and state/data ext4 filesystems read/write, obtained
+DHCP, loaded persisted settings, and served the manager over HTTPS. The current
+image adds DHCP-gated VPN restoration, curl, and the Rust Argon40 submodule
+integration; it has been inspected on the host but has **not** yet been
+reflashed and booted on hardware.
 
 No end-to-end production `make release` has completed with the production RAUC
 inputs. Artifact naming, deterministic manifest creation, four-file

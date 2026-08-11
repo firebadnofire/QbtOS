@@ -78,6 +78,40 @@
     <button type="submit">Complete installation</button>
     <p id="message" aria-live="polite"></p>
   </form>
+  <p id="setup-complete" class="good" hidden>Installation settings are loaded from persistent storage.</p>
+
+  <section id="qbittorrent-service" hidden>
+    <h2>qBittorrent service</h2>
+    <dl id="qbittorrent-status"><dt>State</dt><dd>Loading…</dd></dl>
+    <button type="button" id="retry-vpn">Retry VPN and start qBittorrent</button>
+    <button type="button" id="start-qbittorrent">Start</button>
+    <button type="button" class="secondary" id="stop-qbittorrent">Stop</button>
+    <button type="button" class="secondary" id="restart-qbittorrent">Restart</button>
+    <p>Start and restart remain fail-closed: they are refused unless persistent
+       data is writable and the VPN route, interface, firewall, and handshake
+       checks pass.</p>
+    <p id="qbittorrent-message" aria-live="polite"></p>
+    <p id="vpn-message" aria-live="polite"></p>
+  </section>
+
+  <section id="themes" hidden>
+    <h2>qBittorrent themes</h2>
+    <p>Themes live on persistent storage at <code>/themes</code>. Install only
+       trusted alternative Web UI repositories. Git access is restricted to
+       public HTTPS URLs without embedded credentials.</p>
+    <label for="theme_name">Local theme name</label>
+    <input id="theme_name" maxlength="64" placeholder="VueTorrent">
+    <label for="theme_repository">HTTPS Git repository</label>
+    <input id="theme_repository" type="url" placeholder="https://example.org/owner/theme.git">
+    <label for="theme_branch">Branch (optional)</label>
+    <input id="theme_branch" maxlength="128" placeholder="main">
+    <button type="button" class="secondary" id="install-theme">Install from Git</button>
+    <label for="theme_select">Installed theme</label>
+    <select id="theme_select"><option value="">Built-in qBittorrent UI</option></select>
+    <button type="button" id="select-theme">Apply selected theme</button>
+    <button type="button" class="secondary" id="update-theme">Update selected theme from Git</button>
+    <p id="theme-message" aria-live="polite"></p>
+  </section>
 
   <section>
     <h2>Signed system updates</h2>
@@ -99,6 +133,9 @@
   const form = document.querySelector('#setup');
   const message = document.querySelector('#message');
   const updateMessage = document.querySelector('#update-message');
+  const themeMessage = document.querySelector('#theme-message');
+  const qbittorrentMessage = document.querySelector('#qbittorrent-message');
+  const vpnMessage = document.querySelector('#vpn-message');
   document.querySelector('#vpn_file').addEventListener('change', async event => {
     const file = event.target.files[0];
     if (file) document.querySelector('#vpn_config').value = await file.text();
@@ -132,6 +169,14 @@
     const update = status.update || {};
     const release = status.release || {};
     const bootloader = update.bootloader || {};
+    const qbittorrent = status.qbittorrent || {
+      running: status.qbittorrent_running, state: 'unknown',
+      reason: 'Detailed service status is unavailable.'
+    };
+    const persistence = status.persistence || {};
+    const vpn = status.vpn || {
+      protected: status.vpn_protected, can_retry: status.installed && !status.vpn_protected
+    };
     document.querySelector('#status').innerHTML = `
       <dt>LAN IPv4</dt><dd>${escapeText(status.lan_ip)}</dd>
       <dt>System version</dt><dd>${escapeText(release.version || 'unknown')}</dd>
@@ -143,19 +188,107 @@
       <dt>Update state</dt><dd>${escapeText(update.phase || 'idle')} (${escapeText(update.progress ?? 0)}%): ${escapeText(update.message || '')}</dd>
       <dt>Boot order / attempts</dt><dd>${escapeText(bootloader.boot_order || 'unknown')} — A: ${escapeText(bootloader.boot_a_left || 'unknown')}, B: ${escapeText(bootloader.boot_b_left || 'unknown')}</dd>
       <dt>VPN protection</dt><dd class="${status.vpn_protected ? 'good' : 'bad'}">${status.vpn_protected ? 'Active' : 'Not active'}</dd>
-      <dt>qBittorrent</dt><dd class="${status.qbittorrent_running ? 'good' : 'bad'}">${status.qbittorrent_running ? 'Running' : 'Stopped'}</dd>
+      <dt>qBittorrent</dt><dd class="${qbittorrent.running ? 'good' : 'bad'}">${escapeText(qbittorrent.state || (qbittorrent.running ? 'running' : 'stopped'))}</dd>
+      <dt>Persistent state</dt><dd class="${persistence.state_mounted && persistence.state_writable ? 'good' : 'bad'}">${persistence.state_mounted && persistence.state_writable ? 'Mounted read/write' : 'Unavailable'}</dd>
       <dt>Data path</dt><dd>${escapeText(status.data_path)}</dd>`;
     document.querySelector('#mounts').innerHTML = status.mounts.filter(m => m.writable).map(m => `<option value="${escapeText(m.path)}">`).join('');
     document.querySelector('#diagnostics').innerHTML = status.diagnostics.map(item => `<li>${escapeText(item)}</li>`).join('');
     const link = document.querySelector('#qbt-link');
     link.href = qbtUrl();
-    link.hidden = !status.qbittorrent_running;
+    link.hidden = !qbittorrent.running;
     const feed = update.feed_url || '';
     document.querySelector('#managed_update_feed_url').value = feed;
     if (!document.querySelector('#update_feed_url').value) {
       document.querySelector('#update_feed_url').value = feed;
     }
+    form.hidden = status.installed;
+    document.querySelector('#setup-complete').hidden = !status.installed;
+    document.querySelector('#qbittorrent-service').hidden = !status.installed;
+    document.querySelector('#themes').hidden = !status.installed;
+    document.querySelector('#qbittorrent-status').innerHTML = `
+      <dt>State</dt><dd class="${qbittorrent.running ? 'good' : 'bad'}">${escapeText(qbittorrent.state || 'unknown')}</dd>
+      <dt>Detail</dt><dd>${escapeText(qbittorrent.reason || 'No status detail')}</dd>
+      <dt>PID</dt><dd>${escapeText(qbittorrent.pid ?? 'not running')}</dd>
+      <dt>Persistent data</dt><dd class="${persistence.data_ready ? 'good' : 'bad'}">${escapeText(persistence.data_message || 'unknown')}</dd>`;
+    document.querySelector('#start-qbittorrent').disabled = !qbittorrent.can_start;
+    document.querySelector('#stop-qbittorrent').disabled = !qbittorrent.can_stop;
+    document.querySelector('#restart-qbittorrent').disabled = !qbittorrent.can_stop;
+    document.querySelector('#retry-vpn').disabled = !vpn.can_retry;
+    const themeState = status.themes || {active: '', items: []};
+    const selector = document.querySelector('#theme_select');
+    selector.innerHTML = '<option value="">Built-in qBittorrent UI</option>' +
+      themeState.items.map(theme => `<option value="${escapeText(theme.name)}">${escapeText(theme.name)}${theme.git_managed ? ' (Git)' : ' (local)'}</option>`).join('');
+    selector.value = themeState.active || '';
   }
+  async function qbittorrentCall(operation) {
+    qbittorrentMessage.className = '';
+    qbittorrentMessage.textContent = `Requesting qBittorrent ${operation}…`;
+    try {
+      const response = await fetch(`/api/qbittorrent/${operation}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `qBittorrent ${operation} failed`);
+      qbittorrentMessage.className = 'good';
+      qbittorrentMessage.textContent = result.message;
+      render(result.status);
+    } catch (error) {
+      qbittorrentMessage.className = 'bad';
+      qbittorrentMessage.textContent = error.message;
+      fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
+    }
+  }
+  document.querySelector('#start-qbittorrent').addEventListener('click', () => qbittorrentCall('start'));
+  document.querySelector('#stop-qbittorrent').addEventListener('click', () => qbittorrentCall('stop'));
+  document.querySelector('#restart-qbittorrent').addEventListener('click', () => qbittorrentCall('restart'));
+  async function retryVpn() {
+    vpnMessage.className = '';
+    vpnMessage.textContent = 'Retrying VPN protection checks…';
+    try {
+      const response = await fetch('/api/vpn/retry', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'VPN retry failed');
+      vpnMessage.className = 'good';
+      vpnMessage.textContent = result.message;
+      render(result.status);
+    } catch (error) {
+      vpnMessage.className = 'bad';
+      vpnMessage.textContent = error.message;
+      fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
+    }
+  }
+  document.querySelector('#retry-vpn').addEventListener('click', retryVpn);
+  async function themeCall(path, body) {
+    themeMessage.className = '';
+    themeMessage.textContent = 'Working…';
+    try {
+      const response = await fetch(path, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Theme request failed');
+      themeMessage.className = 'good';
+      themeMessage.textContent = result.message || 'Theme action completed.';
+      render(result.status);
+    } catch (error) {
+      themeMessage.className = 'bad';
+      themeMessage.textContent = error.message;
+    }
+  }
+  document.querySelector('#install-theme').addEventListener('click', () => themeCall('/api/themes/install', {
+    name: document.querySelector('#theme_name').value,
+    repository: document.querySelector('#theme_repository').value,
+    branch: document.querySelector('#theme_branch').value
+  }));
+  document.querySelector('#select-theme').addEventListener('click', () => themeCall('/api/themes/select', {
+    name: document.querySelector('#theme_select').value
+  }));
+  document.querySelector('#update-theme').addEventListener('click', () => themeCall('/api/themes/update', {
+    name: document.querySelector('#theme_select').value
+  }));
   async function updateCall(path, includeFeed = false) {
     updateMessage.className = '';
     updateMessage.textContent = 'Working…';
@@ -186,5 +319,8 @@
     const element = document.createElement('span'); element.textContent = String(value); return element.innerHTML;
   }
   fetch('/api/status').then(response => response.json()).then(render).catch(() => { message.textContent = 'Unable to read system status.'; });
+  setInterval(() => {
+    fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
+  }, 5000);
 </script>
 </body></html>

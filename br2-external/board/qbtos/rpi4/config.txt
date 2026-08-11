@@ -5,6 +5,7 @@ arm_64bit=1
 enable_gic=1
 disable_overscan=1
 gpu_mem=16
+dtparam=i2c_arm=on
 
 # Keep the PL011 UART dedicated to GPIO 14/15 (header pins 8/10).
 enable_uart=1

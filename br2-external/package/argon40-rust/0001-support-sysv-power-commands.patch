@@ -1,0 +1,56 @@
+From 4fc1e175b5bc443728d2bfb14471fc435e52fc1a Mon Sep 17 00:00:00 2001
+From: firebadnofire <william@archuser.org>
+Date: Tue, 11 Aug 2026 15:30:00 -0400
+Subject: [PATCH] support SysV power commands
+
+qbtOS uses BusyBox init rather than systemd. Fall back to the standard
+reboot and poweroff commands when systemctl is absent, and leave a volatile
+marker so the SysV shutdown hook requests the Argon MCU power cut only for a
+real poweroff.
+
+Upstream: Inappropriate [qbtOS-specific SysV integration]
+Signed-off-by: firebadnofire <william@archuser.org>
+---
+ rust/hardware.rs | 25 +++++++++++++++++++++----
+ 1 file changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/rust/hardware.rs b/rust/hardware.rs
+index 3babeb1..5f3f986 100644
+--- a/rust/hardware.rs
++++ b/rust/hardware.rs
+@@ -371,12 +371,29 @@ pub struct SystemdPower;
+
+ impl SystemdPower {
+     fn run(action: &str) -> Result<()> {
+-        let status = Command::new("systemctl")
+-            .arg(action)
++        let systemctl = Path::new("/bin/systemctl").exists()
++            || Path::new("/usr/bin/systemctl").exists();
++        let mut command = if systemctl {
++            let mut command = Command::new("systemctl");
++            command.arg(action);
++            command
++        } else {
++            let executable = match action {
++                "reboot" => "/sbin/reboot",
++                "poweroff" => {
++                    std::fs::write("/run/qbtos-argon-poweroff", b"poweroff\n")
++                        .context("record Argon poweroff request")?;
++                    "/sbin/poweroff"
++                }
++                _ => bail!("unsupported power action {action}"),
++            };
++            Command::new(executable)
++        };
++        let status = command
+             .status()
+-            .with_context(|| format!("execute systemctl {action}"))?;
++            .with_context(|| format!("execute {action}"))?;
+         if !status.success() {
+-            bail!("systemctl {action} exited with {status}");
++            bail!("{action} exited with {status}");
+         }
+         Ok(())
+     }
+--
+2.51.0

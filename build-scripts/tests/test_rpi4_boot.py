@@ -93,7 +93,8 @@ class RaspberryPiBootTests(unittest.TestCase):
 
         self.assertIn("link_qbtos_mbr_partitions", persistence)
         self.assertIn('skip=440 count=4', persistence)
-        self.assertIn('disk_signature="$4$3$2$1"', persistence)
+        self.assertIn("od -An -tx4", persistence)
+        self.assertIn("tr -d ' \\n'", persistence)
         self.assertIn('/dev/disk/by-partuuid/${disk_signature}-0', persistence)
 
 

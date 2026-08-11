@@ -1,0 +1,15 @@
+config BR2_PACKAGE_ARGON40_RUST
+	bool "Argon40 case service (Rust)"
+	depends on BR2_aarch64
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUSTC
+	help
+	  Pure-Rust fan, power-button, OLED, and RTC service for
+	  Argon40 Raspberry Pi cases. qbtOS pins the source as a Git
+	  submodule and builds the same revision with Buildroot Cargo.
+
+	  https://pubcode.archuser.org/firebadnofire/Argon40case-Rust
+
+comment "argon40-rust needs a Rust-supported aarch64 toolchain"
+	depends on BR2_aarch64
+	depends on !BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS

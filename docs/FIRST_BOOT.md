@@ -23,14 +23,42 @@ certificate from port 8080, so the same certificate warning is expected. Sign
 in with the qBittorrent credentials entered during setup. qBittorrent remains
 stopped when protection checks fail.
 
+After installation, the **qBittorrent service** panel provides **Start**,
+**Stop**, and **Restart** controls. It reports the process state and PID,
+persistent-state mount health, data-filesystem readiness, and a specific reason
+when startup is blocked. Start and restart never bypass VPN or storage checks.
+
+## Reboots and themes
+
+The installation marker, VPN profile, qBittorrent profile, TLS identity, and
+manager credentials live on `QBTOS_STATE` and survive reboot. The saved VPN is
+started before qBittorrent. If its interface, route, firewall, or WireGuard
+handshake check fails, qBittorrent deliberately remains stopped. Use **Retry
+VPN and start qBittorrent** in the manager after correcting a transient LAN or
+provider problem; repeating setup is unnecessary. The boot process waits for
+the labeled state and data devices before declaring them missing, and refuses
+to fall back to ephemeral root storage.
+
+After setup, use **qBittorrent themes** in the manager to install a trusted
+alternative Web UI from a public HTTPS Git repository. The checkout must have
+`public/index.html`. Select **Built-in qBittorrent UI** to disable a theme.
+Updates are explicit and replace a validated checkout atomically. All theme
+files live in persistent `/themes` (backed by `/data/themes`).
+
+Argon ONE cases use the upstream default fan curve. A double press requests a
+reboot; a supported long press requests orderly shutdown and case power-off.
+If the service reports that `/dev/i2c-1` is unavailable, verify the image is a
+current Raspberry Pi build and inspect `dtparam=i2c_arm=on` in `config.txt`.
+
 The status page also reports the qbtOS version, active and inactive system
 slots, pending update state, and boot-attempt environment. Do not install an
 update until its OpenPGP checksum and RAUC signature checks both succeed. See
 [UPDATES.md](UPDATES.md) before exercising rollback or serial recovery.
 
-The Pi has no battery-backed clock. qbtOS seeds it with the image build time so
-the initial certificate has a sensible validity period; accurate network time
-synchronization remains future work.
+The Pi has no battery-backed clock. qbtOS seeds it with the image build time and
+persists a monotonic lower bound after VPN success and clean shutdown so a
+reboot cannot replay an older WireGuard handshake timestamp. Accurate network
+time synchronization remains future work.
 
 ## HTTPS behavior
 

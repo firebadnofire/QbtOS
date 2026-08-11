@@ -16,6 +16,8 @@ WG_CONFIG = STATE_ROOT / "vpn/wg0.conf"
 OVPN_CONFIG = STATE_ROOT / "vpn/client.ovpn"
 INSTALLED = STATE_ROOT / "state/installed"
 QBT_PID = Path("/run/qbittorrent.pid")
+QBT_CONFIG = STATE_ROOT / "qbittorrent/qBittorrent/config/qBittorrent.conf"
+CLOCK_EPOCH = STATE_ROOT / "state/clock-epoch"
 OVPN_PID = Path("/run/openvpn-qbtos.pid")
 RESOLV = Path("/run/resolv.conf")
 RESOLV_BACKUP = Path("/run/resolv.conf.before-vpn")
@@ -23,6 +25,8 @@ LAN_NETWORKS = (
     "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16",
     "172.16.0.0/12", "192.168.0.0/16",
 )
+VPN_START_TIMEOUT = 45
+LAN_START_TIMEOUT = 60
 
 
 def run(argv, *, check=True, capture=False, env=None):
@@ -47,14 +51,106 @@ def process_alive(pid_file):
         return False
 
 
+def clock_save():
+    """Persist a monotonic wall-clock floor without writing on every status poll."""
+    epoch = int(time.time())
+    try:
+        epoch = max(epoch, int(CLOCK_EPOCH.read_text(encoding="ascii").strip()))
+    except (OSError, ValueError):
+        pass
+    CLOCK_EPOCH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CLOCK_EPOCH.with_name(f".{CLOCK_EPOCH.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="ascii") as stream:
+            stream.write(f"{epoch}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CLOCK_EPOCH)
+        directory = os.open(CLOCK_EPOCH.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _unescape_mount(value):
+    return (value.replace("\\040", " ").replace("\\011", "\t")
+            .replace("\\012", "\n").replace("\\134", "\\"))
+
+
+def mounted_filesystem(path):
+    """Return the deepest mount containing path, or None if it cannot be read."""
+    resolved = Path(path).resolve()
+    selected = None
+    try:
+        for line in Path("/proc/mounts").read_text(encoding="utf-8").splitlines():
+            device, mountpoint, filesystem, options, *_ = line.split()
+            mount = Path(_unescape_mount(mountpoint))
+            if resolved == mount or mount in resolved.parents:
+                if selected is None or len(str(mount)) > len(str(selected[0])):
+                    selected = (mount, device, filesystem, options.split(","))
+    except (OSError, ValueError):
+        return None
+    return selected
+
+
+def persistent_data_status(settings=None):
+    try:
+        settings = settings or load_settings()
+        data_path = Path(settings["data_path"]).resolve(strict=True)
+    except (OSError, KeyError, json.JSONDecodeError):
+        return False, "persistent data path is not configured"
+    if not data_path.is_dir():
+        return False, "persistent data path is not a directory"
+    mounted = mounted_filesystem(data_path)
+    if not mounted or str(mounted[0]) == "/":
+        return False, f"{data_path} is not on a separate mounted filesystem"
+    if "rw" not in mounted[3] or not os.access(data_path, os.W_OK):
+        return False, f"{data_path} is not writable"
+    return True, f"{data_path} is writable on {mounted[2]}"
+
+
 def qbt_stop():
     if QBT_PID.exists():
         run(["/sbin/start-stop-daemon", "-K", "-q", "-p", str(QBT_PID)], check=False)
+        deadline = time.monotonic() + 10
+        while process_alive(QBT_PID) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if process_alive(QBT_PID):
+            run([
+                "/sbin/start-stop-daemon", "-K", "-q", "-s", "KILL",
+                "-p", str(QBT_PID),
+            ], check=False)
         QBT_PID.unlink(missing_ok=True)
 
 
 def vpn_interface(settings):
     return "wg0" if settings.get("vpn_type") == "wireguard" else "tun0"
+
+
+def lan_ready():
+    address = run([
+        "/sbin/ip", "-4", "-o", "address", "show", "dev", "eth0",
+        "scope", "global",
+    ], check=False, capture=True)
+    route = run([
+        "/sbin/ip", "-4", "route", "show", "default", "dev", "eth0",
+    ], check=False, capture=True)
+    return bool(address.stdout.strip() and route.stdout.strip())
+
+
+def wait_for_lan_ready(timeout=LAN_START_TIMEOUT):
+    """Wait for DHCP address and routing, not merely Ethernet carrier."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if lan_ready():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
 
 
 def vpn_check(verbose=True):
@@ -83,6 +179,20 @@ def vpn_check(verbose=True):
         if verbose:
             print(f"protection check failed: {error}", file=sys.stderr)
         return False
+
+
+def wait_for_vpn_protection(timeout=VPN_START_TIMEOUT):
+    """Allow asynchronous VPN handshakes to settle within a bounded window."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if vpn_check(verbose=False):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        # Generate tunnel traffic without treating public reachability as the
+        # protection result. vpn_check remains authoritative.
+        run(["/bin/ping", "-c", "1", "-W", "1", "1.1.1.1"], check=False)
+        time.sleep(1)
 
 
 def set_vpn_dns(settings):
@@ -132,6 +242,8 @@ def vpn_stop():
 def vpn_start():
     settings = load_settings()
     vpn_stop()
+    if not wait_for_lan_ready():
+        raise RuntimeError("VPN cannot start: wired DHCP address and default route are unavailable")
     if settings.get("vpn_type") == "wireguard":
         run(["/usr/bin/wg-quick", "up", str(WG_CONFIG)])
     elif settings.get("vpn_type") == "openvpn":
@@ -150,10 +262,13 @@ def vpn_start():
             break
         time.sleep(1)
     set_vpn_dns(settings)
-    run(["/bin/ping", "-c", "1", "-W", "5", "1.1.1.1"], check=False)
-    if not vpn_check():
+    if not wait_for_vpn_protection():
+        vpn_check()
         vpn_stop()
         raise RuntimeError("VPN did not pass route, interface, firewall, and handshake checks")
+    # WireGuard rejects replayed handshakes after a wall-clock rollback. Save a
+    # floor immediately after protection succeeds as well as during shutdown.
+    clock_save()
 
 
 def qbt_start():
@@ -163,6 +278,12 @@ def qbt_start():
     if not vpn_check():
         qbt_stop()
         raise RuntimeError("qBittorrent refused: VPN protection is unavailable")
+    data_ready, data_message = persistent_data_status()
+    if not data_ready:
+        qbt_stop()
+        raise RuntimeError(f"qBittorrent refused: {data_message}")
+    if not QBT_CONFIG.is_file():
+        raise RuntimeError("qBittorrent refused: persistent configuration is missing")
     if process_alive(QBT_PID):
         return
     run([
@@ -178,7 +299,43 @@ def qbt_start():
 
 def status():
     protected = vpn_check(verbose=False)
-    print(json.dumps({"vpn_protected": protected, "qbittorrent_running": process_alive(QBT_PID)}))
+    running = process_alive(QBT_PID)
+    data_ready, data_message = persistent_data_status()
+    configured = INSTALLED.exists() and QBT_CONFIG.is_file()
+    if running:
+        state = "running"
+        reason = "qBittorrent is running"
+    elif not INSTALLED.exists():
+        state = "not-installed"
+        reason = "installation is not complete"
+    elif not configured:
+        state = "not-configured"
+        reason = "persistent qBittorrent configuration is missing"
+    elif not data_ready:
+        state = "blocked-storage"
+        reason = data_message
+    elif not protected:
+        state = "blocked-vpn"
+        reason = "VPN protection checks are not passing"
+    else:
+        state = "stopped"
+        reason = "qBittorrent is stopped"
+    pid = None
+    if running:
+        try:
+            pid = int(QBT_PID.read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            pass
+    print(json.dumps({
+        "vpn_protected": protected,
+        "qbittorrent_running": running,
+        "qbittorrent_configured": configured,
+        "qbittorrent_state": state,
+        "qbittorrent_reason": reason,
+        "qbittorrent_pid": pid,
+        "data_ready": data_ready,
+        "data_message": data_message,
+    }))
 
 
 def reboot_system():
@@ -191,6 +348,7 @@ def main():
         "vpn-start": vpn_start,
         "vpn-stop": vpn_stop,
         "vpn-check": vpn_check,
+        "clock-save": clock_save,
         "qbt-start": qbt_start,
         "qbt-stop": qbt_stop,
         "status": status,
@@ -199,10 +357,15 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in operations:
         print(
             "usage: qbtos-control "
-            "{vpn-start|vpn-stop|vpn-check|qbt-start|qbt-stop|status|reboot}",
+            "{vpn-start|vpn-stop|vpn-check|clock-save|qbt-start|qbt-stop|status|reboot}",
             file=sys.stderr)
         return 2
-    result = operations[sys.argv[1]]()
+    try:
+        result = operations[sys.argv[1]]()
+    except (OSError, RuntimeError, json.JSONDecodeError,
+            subprocess.SubprocessError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
     return 0 if result is not False else 1
 
 

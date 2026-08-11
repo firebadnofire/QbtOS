@@ -1,0 +1,2 @@
+# Locally calculated after Buildroot's locked Cargo vendoring post-process.
+sha256  1a374d2c20e2f80bf2e2f2a8967d3b47f4f8478f6dbcafe8c05a0faeca85badd  argon40-rust-cbde9ecd2f03d74767f93e78107b2bd788d4bdab-git4-cargo5.tar.gz

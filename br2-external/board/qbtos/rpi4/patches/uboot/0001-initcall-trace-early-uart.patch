@@ -11,6 +11,7 @@ The debug UART helpers compile to no-ops when CONFIG_DEBUG_UART is disabled.
 Once the normal console is active, avoid the debug UART so it cannot conflict
 with driver-model serial.
 
+Upstream: Not applicable; qbtOS development-only early-boot instrumentation
 Signed-off-by: qbtOS Developers <qbtos@example.invalid>
 ---
  include/initcall.h | 5 +++++

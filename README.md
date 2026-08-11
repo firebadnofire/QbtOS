@@ -8,8 +8,11 @@ provided for development. See [VISION.md](VISION.md) for the longer-term goals.
 qbtOS uses a read-only SquashFS system with A/B slots, a writable state
 partition, and separate torrent-data storage. A small HTTPS management service
 handles first-time setup and reports VPN, firewall, qBittorrent, storage, and
-update status. qBittorrent remains stopped unless setup is complete and the
-VPN traffic-lock checks pass.
+update status. Saved VPN settings are restored on boot before qBittorrent is
+started. qBittorrent remains stopped unless setup is complete and the VPN
+traffic-lock checks pass. After setup, the manager provides explicit Start,
+Stop, and Restart controls plus the service state, PID, storage readiness, and
+the reason a fail-closed start was refused.
 
 > **Development warning:** qbtOS has not been certified for privacy or
 > anonymity. The fail-closed design has been exercised in QEMU, but disconnect,
@@ -42,6 +45,9 @@ The build produces the SD-card-ready raw image:
 ```text
 output/images/sdcard.img
 ```
+
+All qbtOS targets include the `curl` command-line client and CA certificate
+bundle for HTTPS diagnostics and integration testing.
 
 Routine builds use the checked-in defconfig and do not require `menuconfig`.
 Use `make rebuild` for a clean target rebuild or `make distclean` followed by
@@ -86,6 +92,12 @@ same development certificate warning is expected. Verify protection status
 before adding torrents. Detailed setup, diagnostics, and always-on 115200-baud
 GPIO UART instructions are in [docs/FIRST_BOOT.md](docs/FIRST_BOOT.md).
 
+After installation, the management UI can install qBittorrent alternative Web
+UI themes from public, credential-free HTTPS Git URLs, update them atomically,
+and switch between installed themes and qBittorrent's built-in UI. Theme files
+are persistent at `/themes`, backed by the selected data filesystem. A theme is
+accepted only when it contains `public/index.html` and no symbolic links.
+
 ## QEMU development
 
 Build a QCOW2 appliance and a separate sparse data disk with:
@@ -121,10 +133,16 @@ the content they download, possess, and share.
 
 ## Credits
 
-Argon ONE case power-button and fan-control scripts are developed and
-distributed by [Argon 40](https://www.argon40.com/). The source evaluated for
-qbtOS is preserved by the
+Argon ONE case hardware and its original scripts are developed and distributed
+by [Argon 40](https://www.argon40.com/). The Rust service integrated here is
+the [Argon40case-Rust project](https://pubcode.archuser.org/firebadnofire/Argon40case-Rust),
+which derives its hardware behavior from the
 [Argon40-ArgonOne-Script project](https://github.com/okunze/Argon40-ArgonOne-Script).
-The scripts and Argon branding remain the property of their respective owners;
-qbtOS is an independent project and is not affiliated with or endorsed by
-Argon 40.
+qbtOS embeds the Rust project as a Git submodule, pins commit
+`cbde9ecd2f03d74767f93e78107b2bd788d4bdab`, enables the Pi 4 I²C/GPIO
+interfaces, and runs the fan and power-button daemon with its checked-in
+defaults. The source repository currently contains no explicit license grant,
+so qbtOS records it as third-party proprietary material in Buildroot legal
+information rather than assigning it a qbtOS license. The software and Argon
+branding remain the property of their respective owners; qbtOS is independent
+and is not affiliated with or endorsed by Argon 40.

@@ -193,6 +193,19 @@ if [[ ! -f "$marker_path" ]] || [[ "$(cat "$marker_path")" != "$target_name" ]];
 fi
 
 printf 'Building qbtOS %s with %s parallel job(s)\n' "$target_name" "$JOBS"
+# Buildroot intentionally stamps local packages. Refresh locally maintained
+# packages on every developer build so source and init-script edits cannot be
+# hidden by an otherwise valid cached output tree.
+"${buildroot_make[@]}" qbtos-manager-rebuild
+if grep -q '^BR2_PACKAGE_ARGON40_RUST=y$' "${output_dir}/.config"; then
+	"${buildroot_make[@]}" argon40-rust-rebuild
+fi
+# Heal an older configured output tree whose libcurl stamp predates selection
+# of the curl command-line client. Clean builds include it from the defconfig.
+if grep -q '^BR2_PACKAGE_LIBCURL_CURL=y$' "${output_dir}/.config" && \
+	[[ ! -x "${output_dir}/target/usr/bin/curl" ]]; then
+	"${buildroot_make[@]}" libcurl-rebuild
+fi
 "${buildroot_make[@]}" -j"$JOBS"
 
 if [[ "$format" == "flat" ]]; then

@@ -1,3 +1,6 @@
 [submodule "buildroot"]
 	path = buildroot
 	url = https://gitlab.com/buildroot.org/buildroot.git
+[submodule "br2-external/package/argon40-rust/source"]
+	path = br2-external/package/argon40-rust/source
+	url = https://pubcode.archuser.org/firebadnofire/Argon40case-Rust.git

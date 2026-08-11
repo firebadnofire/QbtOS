@@ -13,6 +13,7 @@ serial_init before it can reach the console. Only inspect and probe the device
 when lists_bind_fdt() actually returned one. The existing fallback search can
 then select an available serial device.
 
+Upstream: Not submitted; retained until the fix is verified against current U-Boot
 Signed-off-by: qbtOS Developers <qbtos@example.invalid>
 ---
  drivers/serial/serial-uclass.c | 2 +-

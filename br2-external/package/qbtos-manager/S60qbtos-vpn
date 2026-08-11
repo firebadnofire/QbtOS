@@ -1,0 +1,28 @@
+#!/bin/sh
+
+DAEMON="qbtOS saved VPN"
+INSTALLED="/config/qbtos/state/installed"
+
+case "$1" in
+	start)
+		test -f "$INSTALLED" || exit 0
+		printf 'Starting %s...\n' "$DAEMON"
+		if ! /usr/libexec/qbtos-control vpn-start; then
+			printf '%s\n' \
+				'qbtOS: saved VPN failed protection checks; qBittorrent remains stopped' >&2
+		fi
+		;;
+	stop)
+		/usr/libexec/qbtos-control vpn-stop
+		;;
+	restart)
+		"$0" stop
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

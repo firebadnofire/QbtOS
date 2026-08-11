@@ -2,6 +2,7 @@
 set -eu
 
 install -d -m 0755 "${TARGET_DIR}/boot" "${TARGET_DIR}/config" "${TARGET_DIR}/data" \
+	"${TARGET_DIR}/themes" \
 	"${TARGET_DIR}/usr/share/qbtos"
 chmod 0600 "${TARGET_DIR}/etc/nftables-qbtos.conf"
 

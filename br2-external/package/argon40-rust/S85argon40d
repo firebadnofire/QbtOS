@@ -1,0 +1,50 @@
+#!/bin/sh
+
+DAEMON="argon40d"
+EXECUTABLE="/usr/bin/argon40d"
+PIDFILE="/var/run/$DAEMON.pid"
+
+case "$1" in
+	start)
+		printf 'Starting %s: ' "$DAEMON"
+		if test ! -c /dev/i2c-1; then
+			echo 'SKIPPED (/dev/i2c-1 unavailable)'
+			exit 0
+		fi
+		start-stop-daemon -S -q -b -m -p "$PIDFILE" \
+			-x "$EXECUTABLE" -- --button-actions
+		sleep 1
+		if test -s "$PIDFILE" && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+			echo 'OK'
+		else
+			echo 'FAILED (daemon exited during startup)'
+			rm -f "$PIDFILE"
+			exit 1
+		fi
+		;;
+	stop)
+		printf 'Stopping %s: ' "$DAEMON"
+		if test -s "$PIDFILE"; then
+			start-stop-daemon -K -q -p "$PIDFILE" || true
+		fi
+		rm -f "$PIDFILE"
+		if test -c /dev/i2c-1; then
+			if test -f /run/qbtos-argon-poweroff; then
+				/usr/bin/argon40-shutdown poweroff || true
+			else
+				/usr/bin/argon40-shutdown reboot || true
+			fi
+		fi
+		echo 'OK'
+		;;
+	restart)
+		"$0" stop
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

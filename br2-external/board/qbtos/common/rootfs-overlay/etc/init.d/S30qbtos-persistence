@@ -14,6 +14,20 @@ find_labeled_device() {
 	return 1
 }
 
+wait_for_labeled_device() {
+	requested_label="$1"
+	attempts="${2:-10}"
+	while test "$attempts" -gt 0; do
+		if found_device="$(find_labeled_device "$requested_label")"; then
+			printf '%s\n' "$found_device"
+			return 0
+		fi
+		attempts=$((attempts - 1))
+		test "$attempts" -eq 0 || sleep 1
+	done
+	return 1
+}
+
 mount_data_device() {
 	data_device="$1"
 	filesystem_type="$(blkid "$data_device" 2>/dev/null | \
@@ -65,10 +79,12 @@ link_qbtos_mbr_partitions() {
 	# BusyBox blkid does not report MBR PARTUUIDs. Read the little-endian disk
 	# signature directly, then create the conventional signature-NN links used
 	# by the kernel, RAUC, and fw_printenv.
-	set -- $(dd if="$disk_device" bs=1 skip=440 count=4 2>/dev/null | \
-		od -An -tx1)
-	test "$#" -eq 4 || return 0
-	disk_signature="$4$3$2$1"
+	disk_signature="$(dd if="$disk_device" bs=1 skip=440 count=4 2>/dev/null | \
+		od -An -tx4 | tr -d ' \n')"
+	case "$disk_signature" in
+		????????) ;;
+		*) return 0 ;;
+	esac
 	for partition_number in 1 2 3 4 5 6 7 8; do
 		partition_device="${disk_device}${partition_separator}${partition_number}"
 		test -b "$partition_device" || continue
@@ -77,10 +93,29 @@ link_qbtos_mbr_partitions() {
 	done
 }
 
+restore_clock_floor() {
+	clock_file="/config/qbtos/state/clock-epoch"
+	test -s "$clock_file" || return 0
+	saved_epoch="$(cat "$clock_file")"
+	case "$saved_epoch" in
+		''|*[!0-9]*)
+			printf '%s\n' 'qbtOS: ignoring invalid persistent clock floor' >&2
+			return 0
+			;;
+	esac
+	current_epoch="$(date +%s)"
+	target_epoch=$((saved_epoch + 1))
+	if test "$current_epoch" -lt "$target_epoch"; then
+		printf '%s\n' 'Restoring persistent qbtOS clock floor...'
+		date -u -s "@${target_epoch}" >/dev/null
+	fi
+}
+
 case "$1" in
 	start)
 		printf '%s\n' 'Mounting qbtOS persistent configuration...'
 		mkdir -p /boot /config /data
+		mdev -s 2>/dev/null || true
 		link_partuuid_devices
 		link_qbtos_mbr_partitions
 		if ! mountpoint -q /boot; then
@@ -90,28 +125,44 @@ case "$1" in
 			fi
 		fi
 		if ! mountpoint -q /config; then
-			config_device="$(find_labeled_device QBTOS_STATE || \
-				find_labeled_device QBTOS_CONFIG)" || {
+			config_device="$(wait_for_labeled_device QBTOS_STATE 15 || \
+				wait_for_labeled_device QBTOS_CONFIG 2)" || {
 				printf '%s\n' 'qbtOS: persistent state filesystem not found' >&2
 				exit 1
 			}
 			mount -o noatime "$config_device" /config || exit 1
+		fi
+		if ! mountpoint -q /config || ! grep -q '[[:space:]]/config[[:space:]].*[[:space:]]rw[,[:space:]]' /proc/mounts; then
+			printf '%s\n' 'qbtOS: persistent state is not mounted read/write' >&2
+			exit 1
 		fi
 		install -d -m 0700 /config/qbtos /config/qbtos/tls \
 			/config/qbtos/vpn /config/qbtos/state /config/qbtos/updates \
 			/config/qbtos-backups
 		install -d -o qbtos-qbt -g qbtos-qbt -m 0700 \
 			/config/qbtos/qbittorrent
+		restore_clock_floor
 		if ! mountpoint -q /data; then
-			if data_device="$(find_labeled_device QBTOS_DATA)"; then
+			if data_device="$(wait_for_labeled_device QBTOS_DATA 10)"; then
 				mount_data_device "$data_device" || \
 					printf '%s\n' 'qbtOS: unable to mount QBTOS_DATA' >&2
 			else
 				printf '%s\n' 'qbtOS: QBTOS_DATA filesystem not found' >&2
 			fi
 		fi
+		if mountpoint -q /data; then
+			install -d -m 0755 /data/themes
+			if ! mountpoint -q /themes; then
+				mount --bind /data/themes /themes || \
+					printf '%s\n' 'qbtOS: unable to bind persistent /themes' >&2
+			fi
+		fi
 		;;
 	stop)
+		if mountpoint -q /config; then
+			/usr/libexec/qbtos-control clock-save || \
+				printf '%s\n' 'qbtOS: unable to save persistent clock floor' >&2
+		fi
 		;;
 	*)
 		echo "Usage: $0 {start|stop}"

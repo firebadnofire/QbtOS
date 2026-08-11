@@ -47,7 +47,7 @@ image: build
 imager:
 	"$(CURDIR)/build-scripts/imager.sh"
 
-rebuild: clean build
+rebuild: clean configure build
 
 clean:
 	@if test -f "$(OUTPUT)/Makefile"; then $(MAKE) -C "$(BUILDROOT)" O="$(OUTPUT)" clean; fi

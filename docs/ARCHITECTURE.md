@@ -23,7 +23,8 @@ profile/resume database. Torrent data must be on a mounted writable filesystem
 under `/data`, `/media`, or `/mnt`; an ext4 or NTFS filesystem labeled
 `QBTOS_DATA` is automatically mounted at `/data`. NTFS uses the in-kernel NTFS3
 driver with ownership restricted to the qBittorrent account and Windows
-filename rules enabled.
+filename rules enabled. `/themes` is a bind mount of `/data/themes`, keeping
+alternative qBittorrent Web UIs off the immutable root.
 
 RAUC installs signed rootfs bundles only to the inactive slot. Two redundant
 raw U-Boot environment records in the reserved tail of the state partition
@@ -50,8 +51,12 @@ onboard Bluetooth. Firmware enables the UART, the kernel uses `ttyAMA0` as a
 
 Because a Raspberry Pi 4 has no battery-backed real-time clock, early init
 advances an unset clock to the image build epoch before the manager creates its
-self-signed certificate. This is a minimum-valid-time seed, not a replacement
-for future network time synchronization.
+self-signed certificate. After persistent state mounts, init also restores a
+monotonic clock floor saved after successful VPN establishment and during an
+orderly shutdown. Advancing that floor by one second prevents WireGuard peers
+from rejecting a post-reboot handshake as a replay after the Pi clock rolls
+back. This is a minimum-valid-time mechanism, not a replacement for future
+network time synchronization.
 
 qBittorrent is built from source and runs as `qbtos-qbt`. nftables allows that
 UID to answer its TLS-protected port-8081 Web UI on private Ethernet ranges,
@@ -60,6 +65,39 @@ traffic unless it exits `wg0` or `tun0`. The start gate also requires an
 installed marker, firewall table, up VPN interface, external IPv4 route through
 that interface, and a recent WireGuard handshake when applicable. A watchdog
 stops qBittorrent if those checks later fail.
+
+The manager exposes fixed Start, Stop, and Restart operations; user input is
+never interpolated into a command. Start and restart additionally verify that
+the configured download path resides on a separate writable mount. Status
+distinguishes not installed, not configured, blocked storage, blocked VPN,
+stopped, and running states and includes the process ID when available.
+When protection is blocked, **Retry VPN and start qBittorrent** explicitly
+reruns the fixed privileged VPN operation and starts qBittorrent only after the
+same fail-closed checks pass.
+
+On every installed boot, `S60qbtos-vpn` restores the saved WireGuard or OpenVPN
+profile after networking and before `S70qbittorrent`. It first waits for DHCP
+to install both a global Ethernet address and default route; carrier alone is
+not treated as network readiness. A failed restoration is
+reported but is not a boot failure: the firewall remains fail-closed and
+qBittorrent stays stopped. It does not trigger A/B rollback. VPN startup allows
+up to 45 seconds for asynchronous route and handshake establishment, while the
+full interface, route, firewall, and recent-handshake check remains mandatory.
+
+The manager detects direct child directories of `/themes` containing a regular
+`public/index.html` and no symlinks. Git installs accept public HTTPS remotes
+without embedded credentials. Git is built with TLS-enabled libcurl transport;
+the full Git toolchain is not sufficient without its `remote-https` helper.
+Install and update use a temporary checkout and atomic directory replacement;
+qBittorrent's persistent configuration stores the selected alternative Web UI
+root.
+
+The Raspberry Pi image enables I²C bus 1 and GPIO character devices for the
+pinned Rust Argon40 daemon. Its native GPIO character-device power-button
+backend is used because legacy RPi.GPIO board detection rejects this Buildroot
+userspace. Its upstream default fan curve is installed. Power
+button shutdown requests create a volatile marker so the SysV shutdown hook
+signals the case controller to cut power without confusing reboot with halt.
 
 This is a defense-in-depth foundation, not a production anonymity claim. IPv6
 is disabled in this IPv4-only milestone so it cannot bypass the current `ip`

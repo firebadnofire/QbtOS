@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 import qbtos_update
+import qbtos_themes
 
 STATE_ROOT = Path(os.environ.get("QBTOS_STATE_ROOT", "/config/qbtos"))
 SETTINGS = STATE_ROOT / "settings.json"
@@ -60,6 +61,11 @@ def atomic_write(path, data, mode=0o600):
             os.fsync(stream.fileno())
         os.chmod(temporary, mode)
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         try:
             os.unlink(temporary)
@@ -390,9 +396,9 @@ def ensure_qbittorrent_https():
     os.chown(QBT_CONFIG, account.pw_uid, account.pw_gid)
 
 
-def control(operation):
+def control(operation, timeout=40):
     return subprocess.run(
-        [CONTROL, operation], text=True, timeout=40,
+        [CONTROL, operation], text=True, timeout=timeout,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
 
 
@@ -425,7 +431,8 @@ def mounted_data_paths():
             trusted_path = any(
                 mountpoint == root or mountpoint.startswith(root + "/")
                 for root in SAFE_DATA_ROOTS)
-            if filesystem in {"ext2", "ext3", "ext4", "xfs", "btrfs"} and trusted_path:
+            supported = {"ext2", "ext3", "ext4", "xfs", "btrfs", "ntfs", "ntfs3"}
+            if filesystem in supported and trusted_path:
                 paths.append({"path": mountpoint, "device": device, "filesystem": filesystem,
                               "writable": "rw" in options.split(",")})
     except (OSError, ValueError):
@@ -433,12 +440,48 @@ def mounted_data_paths():
     return paths
 
 
+def theme_status():
+    try:
+        config = QBT_CONFIG.read_text(encoding="utf-8")
+    except OSError:
+        config = ""
+    active = qbtos_themes.active_theme(config)
+    themes = qbtos_themes.list_themes()
+    for theme in themes:
+        theme["active"] = theme["name"] == active
+    return {"root": str(qbtos_themes.THEMES_ROOT), "active": active, "items": themes}
+
+
+def select_theme(name):
+    name = name or ""
+    if name:
+        path = qbtos_themes._theme_path(name)
+        qbtos_themes.validate_theme(path)
+    if not QBT_CONFIG.is_file():
+        raise ValidationError("Complete qBittorrent setup before selecting a theme")
+    control("qbt-stop")
+    updated = qbtos_themes.theme_preferences(
+        QBT_CONFIG.read_text(encoding="utf-8"), name)
+    atomic_write(QBT_CONFIG, updated)
+    account = pwd.getpwnam("qbtos-qbt")
+    os.chown(QBT_CONFIG, account.pw_uid, account.pw_gid)
+    restart = control("qbt-start")
+    return restart.stdout.strip() if restart.returncode else ""
+
+
 def status_payload():
     result = control("status")
     try:
         services = json.loads(result.stdout)
     except json.JSONDecodeError:
-        services = {"vpn_protected": False, "qbittorrent_running": False}
+        services = {
+            "vpn_protected": False, "qbittorrent_running": False,
+            "qbittorrent_configured": False,
+            "qbittorrent_state": "unknown",
+            "qbittorrent_reason": "service status is unavailable",
+            "data_ready": False,
+            "data_message": "persistent storage status is unavailable",
+        }
     settings = {}
     try:
         settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
@@ -449,6 +492,8 @@ def status_payload():
          else "VPN protection checks are not passing"),
         ("qBittorrent is disabled until setup and protection checks succeed"
          if not INSTALLED.exists() else "Installation settings saved"),
+        services.get("data_message", "Persistent storage status is unavailable"),
+        services.get("qbittorrent_reason", "qBittorrent status is unavailable"),
     ]
     release = qbtos_update.read_release()
     active = qbtos_update.active_slot()
@@ -476,14 +521,40 @@ def status_payload():
         update["bootloader"] = qbtos_update.bootloader_state()
     else:
         update["bootloader"] = {"boot_order": "unsupported"}
+    qbittorrent = {
+        "running": services.get("qbittorrent_running", False),
+        "configured": services.get("qbittorrent_configured", False),
+        "state": services.get("qbittorrent_state", "unknown"),
+        "reason": services.get("qbittorrent_reason", "status unavailable"),
+        "pid": services.get("qbittorrent_pid"),
+        "can_start": (
+            INSTALLED.exists() and services.get("vpn_protected", False)
+            and services.get("data_ready", False)
+            and not services.get("qbittorrent_running", False)),
+        "can_stop": services.get("qbittorrent_running", False),
+        "webui_url": f"https://{lan_ip()}:8081/",
+    }
+    vpn = {
+        "type": settings.get("vpn_type", "not configured"),
+        "protected": services.get("vpn_protected", False),
+        "can_retry": INSTALLED.exists() and not services.get("vpn_protected", False),
+    }
     return {
         "installed": INSTALLED.exists(), "lan_ip": lan_ip(),
         "vpn_type": settings.get("vpn_type", "not configured"),
         "vpn_protected": services.get("vpn_protected", False),
+        "vpn": vpn,
         "qbittorrent_running": services.get("qbittorrent_running", False),
+        "qbittorrent": qbittorrent,
+        "persistence": {
+            "state_mounted": Path("/config").is_mount(),
+            "state_writable": os.access("/config", os.W_OK),
+            "data_ready": services.get("data_ready", False),
+            "data_message": services.get("data_message", "status unavailable"),
+        },
         "data_path": settings.get("data_path", "not selected"),
         "mounts": mounted_data_paths(), "diagnostics": diagnostics,
-        "release": release, "update": update,
+        "release": release, "update": update, "themes": theme_status(),
     }
 
 
@@ -627,7 +698,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         allowed = {
             "/api/test", "/api/complete", "/api/update/config",
             "/api/update/check", "/api/update/download", "/api/update/install",
-            "/api/update/reboot",
+            "/api/update/reboot", "/api/themes/install", "/api/themes/update",
+            "/api/themes/select",
+            "/api/vpn/retry",
+            "/api/qbittorrent/start", "/api/qbittorrent/stop",
+            "/api/qbittorrent/restart",
         }
         if self.path not in allowed:
             self._json(404, {"error": "not found"})
@@ -640,8 +715,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.path.startswith("/api/update/"):
                 self._handle_update(payload)
                 return
+            if self.path.startswith("/api/themes/"):
+                self._handle_theme(payload)
+                return
+            if self.path == "/api/vpn/retry":
+                self._handle_vpn_retry()
+                return
+            if self.path.startswith("/api/qbittorrent/"):
+                self._handle_qbittorrent()
+                return
             settings, qbt_password = persist_setup(payload)
-            vpn_result = control("vpn-start")
+            vpn_result = control("vpn-start", timeout=120)
             if vpn_result.returncode != 0:
                 raise ValidationError(vpn_result.stdout.strip() or "VPN protection test failed")
             if self.path == "/api/complete":
@@ -651,12 +735,69 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if qbt_result.returncode != 0:
                     raise ValidationError(qbt_result.stdout.strip() or "qBittorrent did not start")
             self._json(200, {"ok": True, "status": status_payload()})
-        except (ValidationError, qbtos_update.UpdateError, json.JSONDecodeError, KeyError, OSError,
-                subprocess.SubprocessError) as error:
-            control("qbt-stop")
+        except (ValidationError, qbtos_themes.ThemeError, qbtos_update.UpdateError,
+                json.JSONDecodeError, KeyError, OSError, subprocess.SubprocessError) as error:
+            if self.path in {"/api/test", "/api/complete"}:
+                control("qbt-stop")
             if self.path == "/api/complete":
                 INSTALLED.unlink(missing_ok=True)
             self._json(400, {"ok": False, "error": str(error)})
+
+    def _handle_vpn_retry(self):
+        if not INSTALLED.exists():
+            raise ValidationError("Complete appliance setup before retrying the VPN")
+        vpn_result = control("vpn-start", timeout=120)
+        if vpn_result.returncode != 0:
+            raise ValidationError(
+                vpn_result.stdout.strip() or "VPN protection retry failed")
+        qbt_result = control("qbt-start")
+        if qbt_result.returncode != 0:
+            raise ValidationError(
+                qbt_result.stdout.strip() or "VPN recovered but qBittorrent did not start")
+        self._json(200, {
+            "ok": True,
+            "message": "VPN protection restored and qBittorrent started",
+            "status": status_payload(),
+        })
+
+    def _handle_qbittorrent(self):
+        if not INSTALLED.exists():
+            raise ValidationError("Complete appliance setup before controlling qBittorrent")
+        operation = self.path.rsplit("/", 1)[-1]
+        if operation == "restart":
+            control("qbt-stop")
+            result = control("qbt-start")
+        elif operation in {"start", "stop"}:
+            result = control(f"qbt-{operation}")
+        else:
+            raise ValidationError("Unsupported qBittorrent operation")
+        if result.returncode != 0:
+            raise ValidationError(
+                result.stdout.strip() or f"qBittorrent {operation} failed")
+        self._json(200, {
+            "ok": True,
+            "message": f"qBittorrent {operation} completed",
+            "status": status_payload(),
+        })
+
+    def _handle_theme(self, payload):
+        if not INSTALLED.exists():
+            raise ValidationError("Complete appliance setup before managing themes")
+        if self.path == "/api/themes/install":
+            name = qbtos_themes.install_theme(
+                payload.get("name", ""), payload.get("repository", ""),
+                payload.get("branch", ""))
+            message = f"Theme {name} installed; select it to activate"
+        elif self.path == "/api/themes/update":
+            name = qbtos_themes.update_theme(payload.get("name", ""))
+            message = f"Theme {name} updated"
+        elif self.path == "/api/themes/select":
+            name = payload.get("name", "")
+            warning = select_theme(name)
+            message = (f"Theme {name} activated" if name else "Built-in qBittorrent UI activated")
+            if warning:
+                message += "; qBittorrent remains stopped until VPN protection is restored"
+        self._json(200, {"ok": True, "message": message, "status": status_payload()})
 
     def _handle_update(self, payload):
         if self.path == "/api/update/config":
