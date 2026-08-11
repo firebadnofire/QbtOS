@@ -13,6 +13,80 @@ SPEC.loader.exec_module(control)
 
 
 class ServiceControlTests(unittest.TestCase):
+    def test_traffic_lock_allows_only_marked_wireguard_outer_packets(self):
+        firewall = (
+            Path(__file__).parents[3]
+            / "board/qbtos/common/rootfs-overlay/etc/nftables-qbtos.conf"
+        ).read_text(encoding="utf-8")
+        outer_rule = (
+            'meta skuid "qbtos-qbt" oifname "eth0" '
+            "meta mark @wireguard_marks meta l4proto udp accept"
+        )
+        reject_rule = 'meta skuid "qbtos-qbt" reject'
+
+        self.assertIn("set wireguard_marks", firewall)
+        self.assertIn("type mark", firewall)
+        self.assertIn(outer_rule, firewall)
+        self.assertLess(firewall.index(outer_rule), firewall.index(reject_rule))
+        self.assertNotIn(
+            'meta skuid "qbtos-qbt" oifname "eth0" accept', firewall)
+
+    def test_wireguard_fwmark_is_validated_and_added_to_nft_set(self):
+        result = mock.Mock(stdout="0xca6c\n", returncode=0)
+        with mock.patch.object(control, "run", return_value=result) as run:
+            self.assertEqual(control.configure_wireguard_firewall(), "0xca6c")
+
+        self.assertEqual(run.call_args_list, [
+            mock.call(
+                ["/usr/bin/wg", "show", "wg0", "fwmark"], capture=True),
+            mock.call([
+                "/usr/sbin/nft", "flush", "set", "ip", "qbtos",
+                "wireguard_marks",
+            ], check=False),
+            mock.call([
+                "/usr/sbin/nft", "add", "element", "ip", "qbtos",
+                "wireguard_marks", "{", "0xca6c", "}",
+            ]),
+        ])
+
+    def test_wireguard_fwmark_rejects_off_or_malformed_values(self):
+        for value in ("off\n", "0\n", "not-a-mark\n", "0x100000000\n"):
+            with self.subTest(value=value), mock.patch.object(
+                    control, "run",
+                    return_value=mock.Mock(stdout=value, returncode=0)) as run:
+                with self.assertRaisesRegex(RuntimeError, "invalid fwmark"):
+                    control.configure_wireguard_firewall()
+                run.assert_called_once_with(
+                    ["/usr/bin/wg", "show", "wg0", "fwmark"], capture=True)
+
+    def test_wireguard_protection_requires_mark_in_nft_set(self):
+        results = [
+            mock.Mock(stdout="0xca6c\n", returncode=0),
+            mock.Mock(stdout="", returncode=1),
+        ]
+        with mock.patch.object(control, "run", side_effect=results):
+            with self.assertRaisesRegex(RuntimeError, "traffic lock is not loaded"):
+                control.wireguard_firewall_ready()
+
+    def test_wireguard_protection_checks_outer_packet_mark(self):
+        results = [
+            mock.Mock(stdout="", returncode=0),
+            mock.Mock(stdout="2: wg0: <POINTOPOINT,UP>\n", returncode=0),
+            mock.Mock(stdout="1.1.1.1 dev wg0\n", returncode=0),
+            mock.Mock(stdout="peer-key\t900\n", returncode=0),
+        ]
+        with mock.patch.object(
+                control, "load_settings",
+                return_value={"vpn_type": "wireguard"}), \
+                mock.patch.object(control, "run", side_effect=results), \
+                mock.patch.object(
+                    control, "wireguard_firewall_ready", return_value=True
+                ) as ready, \
+                mock.patch.object(control.time, "time", return_value=1000):
+            self.assertTrue(control.vpn_check(verbose=False))
+
+        ready.assert_called_once_with()
+
     def test_clock_save_never_moves_persistent_floor_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
             clock = Path(directory) / "state/clock-epoch"

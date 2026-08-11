@@ -27,6 +27,7 @@ LAN_NETWORKS = (
 )
 VPN_START_TIMEOUT = 45
 LAN_START_TIMEOUT = 60
+WIREGUARD_MARK_SET = "wireguard_marks"
 
 
 def run(argv, *, check=True, capture=False, env=None):
@@ -165,6 +166,7 @@ def vpn_check(verbose=True):
         if f"dev {interface}" not in route.stdout:
             raise RuntimeError(f"external IPv4 route does not use {interface}")
         if interface == "wg0":
+            wireguard_firewall_ready()
             handshake = run(["/usr/bin/wg", "show", "wg0", "latest-handshakes"], capture=True)
             timestamps = [
                 int(line.rsplit("\t", 1)[-1])
@@ -212,6 +214,48 @@ def restore_dns():
         RESOLV_BACKUP.unlink()
 
 
+def wireguard_fwmark():
+    """Return wg0's validated nonzero routing mark in nftables notation."""
+    result = run(["/usr/bin/wg", "show", "wg0", "fwmark"], capture=True)
+    value = result.stdout.strip()
+    try:
+        mark = int(value, 0)
+    except ValueError as error:
+        raise RuntimeError(f"WireGuard reported an invalid fwmark: {value!r}") from error
+    if mark <= 0 or mark > 0xFFFFFFFF:
+        raise RuntimeError(f"WireGuard reported an invalid fwmark: {value!r}")
+    return f"0x{mark:x}"
+
+
+def clear_wireguard_firewall():
+    run([
+        "/usr/sbin/nft", "flush", "set", "ip", "qbtos",
+        WIREGUARD_MARK_SET,
+    ], check=False)
+
+
+def configure_wireguard_firewall():
+    """Permit only WireGuard's marked outer UDP packets for qBittorrent."""
+    mark = wireguard_fwmark()
+    clear_wireguard_firewall()
+    run([
+        "/usr/sbin/nft", "add", "element", "ip", "qbtos",
+        WIREGUARD_MARK_SET, "{", mark, "}",
+    ])
+    return mark
+
+
+def wireguard_firewall_ready():
+    mark = wireguard_fwmark()
+    result = run([
+        "/usr/sbin/nft", "get", "element", "ip", "qbtos",
+        WIREGUARD_MARK_SET, "{", mark, "}",
+    ], check=False, capture=True)
+    if result.returncode != 0:
+        raise RuntimeError("WireGuard outer-packet traffic lock is not loaded")
+    return True
+
+
 def remove_lan_return_rules():
     for priority, network in enumerate(LAN_NETWORKS, start=100):
         run([
@@ -231,6 +275,7 @@ def add_lan_return_rules():
 
 def vpn_stop():
     qbt_stop()
+    clear_wireguard_firewall()
     remove_lan_return_rules()
     run(["/usr/bin/wg-quick", "down", str(WG_CONFIG)], check=False)
     if OVPN_PID.exists():
@@ -246,6 +291,7 @@ def vpn_start():
         raise RuntimeError("VPN cannot start: wired DHCP address and default route are unavailable")
     if settings.get("vpn_type") == "wireguard":
         run(["/usr/bin/wg-quick", "up", str(WG_CONFIG)])
+        configure_wireguard_firewall()
     elif settings.get("vpn_type") == "openvpn":
         run([
             "/usr/sbin/openvpn", "--config", str(OVPN_CONFIG),

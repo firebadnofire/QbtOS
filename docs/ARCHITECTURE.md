@@ -66,6 +66,14 @@ installed marker, firewall table, up VPN interface, external IPv4 route through
 that interface, and a recent WireGuard handshake when applicable. A watchdog
 stops qBittorrent if those checks later fail.
 
+WireGuard's encrypted outer UDP packets retain the originating socket UID even
+though they leave through Ethernet. VPN startup therefore reads `wg0`'s
+kernel-assigned fwmark and adds it to an initially empty nftables mark set. The
+traffic lock permits UID `qbtos-qbt` on Ethernet only when that mark is present;
+ordinary unmarked traffic remains rejected. VPN shutdown flushes the set, and
+the protection check refuses to report WireGuard as ready when the active mark
+is missing from it.
+
 The manager exposes fixed Start, Stop, and Restart operations; user input is
 never interpolated into a command. Start and restart additionally verify that
 the configured download path resides on a separate writable mount. Status
