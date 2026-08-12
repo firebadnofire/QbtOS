@@ -147,16 +147,19 @@ test -x "${host_dir}/bin/mksquashfs" || \
 	die 'Buildroot host mksquashfs tool was not built'
 host_path="${host_dir}/bin:${host_dir}/sbin:${PATH}"
 if test -n "$rauc_intermediate_option"; then
-	PATH="$host_path" "$host_rauc" bundle \
+	PATH="$host_path" "$host_rauc" \
+		-C keyring:check-purpose=codesign bundle \
 		--cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
 		"$rauc_intermediate_option" --signing-keyring="$rauc_signing_keyring" \
 		"$bundle_root" "$bundle"
 else
-	PATH="$host_path" "$host_rauc" bundle \
+	PATH="$host_path" "$host_rauc" \
+		-C keyring:check-purpose=codesign bundle \
 		--cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
 		--signing-keyring="$rauc_signing_keyring" "$bundle_root" "$bundle"
 fi
-PATH="$host_path" "$host_rauc" info \
+PATH="$host_path" "$host_rauc" \
+	-C keyring:check-purpose=codesign info \
 	--keyring="$rauc_signing_keyring" "$bundle" >/dev/null
 
 "${script_dir}/release-manifest.py" \

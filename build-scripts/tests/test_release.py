@@ -118,8 +118,12 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertIn('test -x "${host_dir}/bin/mksquashfs"', script)
         self.assertIn(
             'host_path="${host_dir}/bin:${host_dir}/sbin:${PATH}"', script)
-        self.assertIn('PATH="$host_path" "$host_rauc" bundle', script)
-        self.assertIn('PATH="$host_path" "$host_rauc" info', script)
+        self.assertEqual(
+            script.count('-C keyring:check-purpose=codesign'), 3)
+        self.assertIn(
+            '-C keyring:check-purpose=codesign bundle', script)
+        self.assertIn(
+            '-C keyring:check-purpose=codesign info', script)
 
 
 class ForgejoWorkflowTests(unittest.TestCase):
