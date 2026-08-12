@@ -244,6 +244,15 @@ jobs:
           set -euo pipefail
           ./build-scripts/publish-forgejo-release.sh
 
+      - name: Mirror GitHub release
+        shell: bash
+        env:
+          GH_KEY: ${{ secrets.GH_KEY }}
+          GITHUB_REPOSITORY: firebadnofire/qbtos
+        run: |
+          set -euo pipefail
+          ./build-scripts/publish-github-release.sh
+
       - name: Upload release files
         uses: https://data.forgejo.org/actions/upload-artifact@v4
         with:

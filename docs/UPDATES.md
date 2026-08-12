@@ -136,6 +136,13 @@ decodes that form before importing it. `CI_TRUSTED_PUBLIC_KEYS` remains raw,
 importable public OpenPGP data.
 The stable feed URL is
 `https://FORGEJO/OWNER/REPOSITORY/raw/branch/update-feed/latest.json`.
+
+Release publication is idempotent after a partial CI failure. The publisher
+reuses an existing tag release, reconciles the four managed assets, creates the
+`update-feed` branch from `main` when necessary, and creates or updates
+`latest.json` as appropriate. The same four signed artifacts are mirrored to
+`https://github.com/firebadnofire/qbtos` using the dedicated `GH_KEY` secret;
+the canonical moving update feed remains on Forgejo.
 `CI_TRUSTED_PUBLIC_KEYS` is an optional public-key bundle used during OpenPGP
 rotation. Rotate either trust system with an overlap release: first ship both
 old and new public trust roots, then change the signer, and remove the old root

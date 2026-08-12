@@ -12,6 +12,7 @@ MANIFEST_SCRIPT = REPO / "build-scripts/release-manifest.py"
 RELEASE_SCRIPT = REPO / "build-scripts/release.sh"
 FORGEJO_WORKFLOW = REPO / ".forgejo/workflows/release.yml"
 FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
+GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
 
 
 class TemporaryRepository:
@@ -147,6 +148,38 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("new_branch_name:$branch,old_ref_name:$source", publish)
         self.assertIn('"${api}/branches"', publish)
         self.assertNotIn('"${api}/git/refs"', publish)
+
+    def test_feed_creation_uses_post_and_updates_use_put(self):
+        publish = FORGEJO_PUBLISH.read_text(encoding="utf-8")
+
+        self.assertIn("content_method=POST", publish)
+        self.assertIn("content_method=PUT", publish)
+        self.assertIn('-X "$content_method"', publish)
+        self.assertIn("--arg source 'main'", publish)
+        self.assertIn("--fail-with-body", publish)
+
+    def test_partial_release_rerun_reconciles_managed_assets(self):
+        publish = FORGEJO_PUBLISH.read_text(encoding="utf-8")
+
+        self.assertIn("reusing release", publish)
+        self.assertIn('select(.name == $name)', publish)
+        self.assertIn('cp "$response" "$asset_list"', publish)
+        self.assertIn("forgejo-assets.json", publish)
+        self.assertNotIn("jq -r '.[].id'", publish)
+
+    def test_release_is_mirrored_to_github_with_existing_secret(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+        publish = GITHUB_PUBLISH.read_text(encoding="utf-8")
+
+        self.assertIn("Mirror GitHub release", workflow)
+        self.assertIn("GH_KEY: ${{ secrets.GH_KEY }}", workflow)
+        self.assertIn("firebadnofire/qbtos", workflow)
+        self.assertIn(': "${GH_KEY:?GH_KEY is required}"', publish)
+        self.assertIn("api.github.com/repos/${repository}", publish)
+        self.assertIn("uploads.github.com/repos/${repository}", publish)
+        self.assertIn("github-assets.json", publish)
+        self.assertIn("--fail-with-body", publish)
+        self.assertNotIn("set -x", publish)
 
     def test_shared_openpgp_secret_is_decoded_before_import(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
