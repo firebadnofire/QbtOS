@@ -130,6 +130,10 @@ torrent payload data is never migrated.
 Forgejo requires `RAUC_CERT_PEM`, `RAUC_KEY_PEM`, `CI_KEY`, and
 `CI_KEY_PASSPHRASE`. The workflow's short-lived automatic `FORGEJO_TOKEN`
 publishes exactly four release attachments and updates the `update-feed` branch.
+`CI_KEY` may contain an ASCII-armored OpenPGP private key, but the shared
+Forgejo account secret normally contains its base64 encoding; the workflow
+decodes that form before importing it. `CI_TRUSTED_PUBLIC_KEYS` remains raw,
+importable public OpenPGP data.
 The stable feed URL is
 `https://FORGEJO/OWNER/REPOSITORY/raw/branch/update-feed/latest.json`.
 `CI_TRUSTED_PUBLIC_KEYS` is an optional public-key bundle used during OpenPGP

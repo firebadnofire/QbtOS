@@ -131,6 +131,45 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('"${api}/branches"', publish)
         self.assertNotIn('"${api}/git/refs"', publish)
 
+    def test_shared_openpgp_secret_is_decoded_before_import(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("key_file=\"$gnupg_home/release-signing-key\"", workflow)
+        self.assertIn("-----BEGIN PGP PRIVATE KEY BLOCK-----", workflow)
+        self.assertIn("base64 --decode > \"$key_file\"", workflow)
+        self.assertIn('gpg --batch --import "$key_file"', workflow)
+        self.assertNotIn(
+            'printf \'%s\\n\' "$CI_KEY" | GNUPGHOME="$gnupg_home"', workflow
+        )
+
+    def test_openpgp_signer_selection_and_cleanup_are_fail_closed(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("--with-colons", workflow)
+        self.assertIn('"${#signing_fingerprints[@]}" -ne 1', workflow)
+        self.assertIn("QBTOS_GPG_FINGERPRINT=%s", workflow)
+        self.assertIn("CI_TRUSTED_PUBLIC_KEYS", workflow)
+        self.assertIn('gpg --batch --export \\\n', workflow)
+        self.assertNotIn("--export-secret", workflow)
+        self.assertIn('if: always()', workflow)
+        self.assertIn(
+            'rm -f "$RUNNER_TEMP/qbtos-release-gnupg/release-signing-key"',
+            workflow,
+        )
+        self.assertIn(
+            'rm -rf -- "$RUNNER_TEMP/qbtos-release-gnupg"', workflow
+        )
+
+    def test_checksum_signature_is_verified_before_publication(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("--pinentry-mode loopback --passphrase-fd 0", workflow)
+        self.assertIn("--armor --clearsign", workflow)
+        self.assertIn('--verify "dist/$VERSION.sha256"', workflow)
+        self.assertIn('gpg --batch --decrypt \\\n', workflow)
+        self.assertIn('"$VERSION.sha256" | sha256sum -c -', workflow)
+        self.assertIn('find dist -maxdepth 1 -type f | wc -l', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

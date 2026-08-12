@@ -95,14 +95,49 @@ jobs:
 
           gnupg_home="$RUNNER_TEMP/qbtos-release-gnupg"
           install -d -m 0700 "$gnupg_home"
-          printf '%s\n' "$CI_KEY" | GNUPGHOME="$gnupg_home" gpg --batch --import
-          if [[ -n "$CI_TRUSTED_PUBLIC_KEYS" ]]; then
-            printf '%s\n' "$CI_TRUSTED_PUBLIC_KEYS" | \
-              GNUPGHOME="$gnupg_home" gpg --batch --import
+          key_file="$gnupg_home/release-signing-key"
+          install -m 0600 /dev/null "$key_file"
+          case "$CI_KEY" in
+            *'-----BEGIN PGP PRIVATE KEY BLOCK-----'*)
+              printf '%s' "$CI_KEY" > "$key_file"
+              ;;
+            *)
+              if ! printf '%s' "$CI_KEY" | base64 --decode > "$key_file"; then
+                echo 'CI_KEY is neither an armored nor valid base64 OpenPGP key' >&2
+                exit 1
+              fi
+              ;;
+          esac
+          if ! GNUPGHOME="$gnupg_home" gpg --batch --import "$key_file"; then
+            echo 'CI_KEY did not contain importable OpenPGP key material' >&2
+            exit 1
           fi
-          fingerprint="$(GNUPGHOME="$gnupg_home" gpg --batch --with-colons \
-            --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
-          [[ "$fingerprint" =~ ^[0-9A-Fa-f]{40,64}$ ]]
+          rm -f "$key_file"
+
+          mapfile -t signing_fingerprints < <(
+            GNUPGHOME="$gnupg_home" gpg --batch --with-colons \
+              --list-secret-keys | \
+              awk -F: '$1 == "sec" { primary = 1; next }
+                primary && $1 == "fpr" { print $10; primary = 0 }'
+          )
+          if [[ "${#signing_fingerprints[@]}" -ne 1 ]]; then
+            echo 'CI_KEY must contain exactly one primary OpenPGP secret key' >&2
+            exit 1
+          fi
+          fingerprint="${signing_fingerprints[0]}"
+          if [[ ! "$fingerprint" =~ ^[0-9A-Fa-f]{40,64}$ ]]; then
+            echo 'CI_KEY produced an invalid OpenPGP fingerprint' >&2
+            exit 1
+          fi
+
+          if [[ -n "$CI_TRUSTED_PUBLIC_KEYS" ]]; then
+            if ! printf '%s' "$CI_TRUSTED_PUBLIC_KEYS" | \
+              GNUPGHOME="$gnupg_home" gpg --batch --import; then
+              echo 'CI_TRUSTED_PUBLIC_KEYS is not importable OpenPGP data' >&2
+              exit 1
+            fi
+          fi
+
           GNUPGHOME="$gnupg_home" gpg --batch --export \
             > "$RUNNER_TEMP/qbtos-update-signing.gpg"
           [[ -s "$RUNNER_TEMP/qbtos-update-signing.gpg" ]]
@@ -181,8 +216,6 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/rauc-release.crt" "$RUNNER_TEMP/rauc-release.key"
+          rm -f "$RUNNER_TEMP/qbtos-release-gnupg/release-signing-key"
           rm -f "$RUNNER_TEMP/qbtos-update-signing.gpg"
-          if [[ -n "${QBTOS_GNUPGHOME:-}" && -d "$QBTOS_GNUPGHOME" ]]; then
-            find "$QBTOS_GNUPGHOME" -type f -delete
-            find "$QBTOS_GNUPGHOME" -depth -type d -empty -delete
-          fi
+          rm -rf -- "$RUNNER_TEMP/qbtos-release-gnupg"
