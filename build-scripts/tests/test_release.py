@@ -9,6 +9,7 @@ from pathlib import Path
 REPO = Path(__file__).parents[2]
 VERSION_SCRIPT = REPO / "build-scripts/release-version.sh"
 MANIFEST_SCRIPT = REPO / "build-scripts/release-manifest.py"
+RELEASE_SCRIPT = REPO / "build-scripts/release.sh"
 FORGEJO_WORKFLOW = REPO / ".forgejo/workflows/release.yml"
 FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 
@@ -107,6 +108,18 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(value["schema"], 1)
             self.assertEqual(value["bundle_filename"], bundle.name)
             self.assertEqual(value["checksum_filename"], "2026-08-02-rev1.sha256")
+
+
+class ReleaseScriptTests(unittest.TestCase):
+    def test_rauc_uses_buildroot_host_helpers(self):
+        script = RELEASE_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('host_dir="${release_output}/host"', script)
+        self.assertIn('test -x "${host_dir}/bin/mksquashfs"', script)
+        self.assertIn(
+            'host_path="${host_dir}/bin:${host_dir}/sbin:${PATH}"', script)
+        self.assertIn('PATH="$host_path" "$host_rauc" bundle', script)
+        self.assertIn('PATH="$host_path" "$host_rauc" info', script)
 
 
 class ForgejoWorkflowTests(unittest.TestCase):

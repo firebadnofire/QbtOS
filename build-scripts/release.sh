@@ -140,17 +140,24 @@ command -v zstd >/dev/null 2>&1 || die 'host zstd is required'
 zstd -q -f -19 "${release_output}/images/sdcard.img" -o "$image"
 zstd -q -t "$image"
 
-host_rauc="${release_output}/host/bin/rauc"
+host_dir="${release_output}/host"
+host_rauc="${host_dir}/bin/rauc"
 test -x "$host_rauc" || die 'Buildroot host RAUC tool was not built'
+test -x "${host_dir}/bin/mksquashfs" || \
+	die 'Buildroot host mksquashfs tool was not built'
+host_path="${host_dir}/bin:${host_dir}/sbin:${PATH}"
 if test -n "$rauc_intermediate_option"; then
-	"$host_rauc" bundle --cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
+	PATH="$host_path" "$host_rauc" bundle \
+		--cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
 		"$rauc_intermediate_option" --signing-keyring="$rauc_signing_keyring" \
 		"$bundle_root" "$bundle"
 else
-	"$host_rauc" bundle --cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
+	PATH="$host_path" "$host_rauc" bundle \
+		--cert="$RAUC_CERT_FILE" --key="$RAUC_KEY_FILE" \
 		--signing-keyring="$rauc_signing_keyring" "$bundle_root" "$bundle"
 fi
-"$host_rauc" info --keyring="$rauc_signing_keyring" "$bundle" >/dev/null
+PATH="$host_path" "$host_rauc" info \
+	--keyring="$rauc_signing_keyring" "$bundle" >/dev/null
 
 "${script_dir}/release-manifest.py" \
 	--version "$VERSION" --build-date "$BUILD_DATE" --revision "$REVISION" \
