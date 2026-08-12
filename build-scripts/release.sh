@@ -72,9 +72,12 @@ key_public=$(openssl pkey -in "$RAUC_KEY_FILE" -pubout -outform DER 2>/dev/null 
 test "$cert_public" = "$key_public" || die 'RAUC certificate and key do not match'
 
 certificate_subject=$(openssl x509 -in "$RAUC_CERT_FILE" -noout -subject -issuer)
-openssl x509 -in "$RAUC_CERT_FILE" -noout -purpose | \
-	grep -q '^Code signing : Yes$' || die 'RAUC certificate lacks codeSigning purpose'
-openssl x509 -in "$RAUC_CERT_FILE" -noout -text | \
+openssl x509 -in "$RAUC_CERT_FILE" -noout -ext basicConstraints | \
+	grep -q 'CA:FALSE' || die 'RAUC certificate must be a non-CA leaf'
+openssl x509 -in "$RAUC_CERT_FILE" -noout -ext extendedKeyUsage | \
+	grep -Eq 'Code Signing|1\.3\.6\.1\.5\.5\.7\.3\.3' || \
+	die 'RAUC certificate lacks codeSigning EKU'
+openssl x509 -in "$RAUC_CERT_FILE" -noout -ext keyUsage | \
 	grep -q 'Digital Signature' || die 'RAUC certificate lacks digitalSignature key usage'
 
 if test "${QBTOS_ALLOW_DEVELOPMENT_CERT:-0}" = 1; then

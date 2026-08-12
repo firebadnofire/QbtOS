@@ -12,6 +12,7 @@ CA_DIR = REPO / "ca"
 VALIDATOR = REPO / "br2-external/package/qbtos-ca/validate-ca.sh"
 PACKAGE_MK = REPO / "br2-external/package/qbtos-ca/qbtos-ca.mk"
 RELEASE_SCRIPT = REPO / "build-scripts/release.sh"
+POST_BUILD = REPO / "br2-external/board/qbtos/common/post-build.sh"
 RAUC_CONFIG = (
     REPO / "br2-external/board/qbtos/rpi4/rootfs-overlay/etc/rauc/system.conf"
 )
@@ -20,6 +21,18 @@ RAUC_CONFIG = (
 class CertificateTrustTests(unittest.TestCase):
     def test_release_certificate_chains_to_dedicated_root(self):
         subprocess.run([VALIDATOR, shutil.which("openssl"), CA_DIR], check=True)
+
+    def test_leaf_extensions_are_inspected_directly(self):
+        sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (VALIDATOR, RELEASE_SCRIPT, POST_BUILD)
+        )
+
+        self.assertNotIn("-noout -purpose", sources)
+        self.assertIn("-noout -ext basicConstraints", sources)
+        self.assertIn("-noout -ext extendedKeyUsage", sources)
+        self.assertIn("1\\.3\\.6\\.1\\.5\\.5\\.7\\.3\\.3", sources)
+        self.assertIn("-noout -ext keyUsage", sources)
 
     def test_private_key_material_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

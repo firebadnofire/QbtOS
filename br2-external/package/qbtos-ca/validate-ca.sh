@@ -41,17 +41,20 @@ for name in root-ca.pem intermediate-ca.pem; do
 		exit 1
 	}
 done
-"$openssl" x509 -in "${source_dir}/release.crt" -noout -text | \
+"$openssl" x509 -in "${source_dir}/release.crt" \
+	-noout -ext basicConstraints | \
 	grep -q 'CA:FALSE' || {
 	printf '%s\n' 'qbtOS CA: release.crt must be a non-CA leaf' >&2
 	exit 1
 }
-"$openssl" x509 -in "${source_dir}/release.crt" -noout -purpose | \
-	grep -q '^Code signing : Yes$' || {
-	printf '%s\n' 'qbtOS CA: release.crt lacks the codeSigning purpose' >&2
+"$openssl" x509 -in "${source_dir}/release.crt" \
+	-noout -ext extendedKeyUsage | \
+	grep -Eq 'Code Signing|1\.3\.6\.1\.5\.5\.7\.3\.3' || {
+	printf '%s\n' 'qbtOS CA: release.crt lacks the codeSigning EKU' >&2
 	exit 1
 }
-"$openssl" x509 -in "${source_dir}/release.crt" -noout -text | \
+"$openssl" x509 -in "${source_dir}/release.crt" \
+	-noout -ext keyUsage | \
 	grep -q 'Digital Signature' || {
 	printf '%s\n' 'qbtOS CA: release.crt lacks digitalSignature key usage' >&2
 	exit 1

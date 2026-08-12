@@ -35,13 +35,19 @@ if test "${QBTOS_RELEASE_BUILD:-0}" = 1; then
 		printf '%s\n' 'RAUC certificate file contains private key material' >&2
 		exit 1
 	fi
-	openssl x509 -in "${QBTOS_RAUC_CERT_FILE}" -noout -purpose | \
-		grep -q '^Code signing : Yes$' || {
-		printf '%s\n' 'RAUC certificate lacks codeSigning purpose' >&2
+	openssl x509 -in "${QBTOS_RAUC_CERT_FILE}" \
+		-noout -ext basicConstraints | grep -q 'CA:FALSE' || {
+		printf '%s\n' 'RAUC certificate must be a non-CA leaf' >&2
 		exit 1
 	}
-	openssl x509 -in "${QBTOS_RAUC_CERT_FILE}" -noout -text | \
-		grep -q 'Digital Signature' || {
+	openssl x509 -in "${QBTOS_RAUC_CERT_FILE}" \
+		-noout -ext extendedKeyUsage | \
+		grep -Eq 'Code Signing|1\.3\.6\.1\.5\.5\.7\.3\.3' || {
+		printf '%s\n' 'RAUC certificate lacks codeSigning EKU' >&2
+		exit 1
+	}
+	openssl x509 -in "${QBTOS_RAUC_CERT_FILE}" \
+		-noout -ext keyUsage | grep -q 'Digital Signature' || {
 		printf '%s\n' 'RAUC certificate lacks digitalSignature key usage' >&2
 		exit 1
 	}
