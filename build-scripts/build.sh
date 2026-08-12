@@ -20,6 +20,7 @@ Environment:
   JOBS                     Parallel build jobs (default: detected CPU count)
   QBTOS_OUTPUT_DIR         Override the selected Buildroot output directory;
                            relative paths resolve from the repository root
+  QBTOS_BUILD_QUIET        Set to 1 to suppress routine Buildroot command echo
 
 Examples:
   build-scripts/build.sh --format flat
@@ -159,6 +160,10 @@ if [[ -z "${JOBS:-}" ]]; then
 fi
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die_usage \
 	"JOBS must be a positive integer, got: ${JOBS}"
+case "${QBTOS_BUILD_QUIET:-0}" in
+	0|1) ;;
+	*) die_usage "QBTOS_BUILD_QUIET must be 0 or 1" ;;
+esac
 
 # Host paths can contaminate Buildroot configure tests or be rejected outright.
 unset LD_LIBRARY_PATH PKG_CONFIG_PATH
@@ -170,6 +175,9 @@ buildroot_make=(
 	"BR2_EXTERNAL=${external_dir}"
 	"O=${output_dir}"
 )
+if [[ "${QBTOS_BUILD_QUIET:-0}" == 1 ]]; then
+	buildroot_make=(make --silent --no-print-directory "${buildroot_make[@]:1}")
+fi
 
 if ((configure)); then
 	printf 'Configuring qbtOS target %s in %s\n' "$target_name" "$output_dir"

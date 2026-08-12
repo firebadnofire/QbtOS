@@ -209,6 +209,19 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('test -r "$RAUC_KEY_FILE"', workflow)
         self.assertNotIn("chmod 0644", workflow)
 
+    def test_ci_suppresses_routine_build_output(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+        build_script = (REPO / "build-scripts/build.sh").read_text(
+            encoding="utf-8")
+
+        self.assertIn("apt-get -qq update", workflow)
+        self.assertIn("apt-get -qq install", workflow)
+        self.assertIn("QBTOS_BUILD_QUIET=1", workflow)
+        self.assertIn("make --silent --no-print-directory check", workflow)
+        self.assertIn("make --silent --no-print-directory release", workflow)
+        self.assertIn('QBTOS_BUILD_QUIET:-0', build_script)
+        self.assertIn("buildroot_make=(make --silent --no-print-directory", build_script)
+
 
 if __name__ == "__main__":
     unittest.main()
