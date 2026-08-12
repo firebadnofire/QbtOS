@@ -170,6 +170,28 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('"$VERSION.sha256" | sha256sum -c -', workflow)
         self.assertIn('find dist -maxdepth 1 -type f | wc -l', workflow)
 
+    def test_buildroot_release_runs_as_unprivileged_node_user(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("Dependency installation UID: %s", workflow)
+        self.assertIn('test "$(id -u)" -eq 0', workflow)
+        self.assertIn("build_user=node", workflow)
+        self.assertIn('chown -R "$build_user:$build_user" "$workspace"', workflow)
+        self.assertIn('runuser --user "$build_user" -- env', workflow)
+        self.assertIn('printf "Build UID: %s\\n" "$(id -u)"', workflow)
+        self.assertIn('test "$(id -u)" -ne 0', workflow)
+        self.assertNotIn("FORCE_UNSAFE_CONFIGURE", workflow)
+
+    def test_unprivileged_build_inputs_remain_private(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn('chgrp "$build_user" "$RUNNER_TEMP"', workflow)
+        self.assertIn('chmod g+x "$RUNNER_TEMP"', workflow)
+        self.assertIn('chmod 0600 "$signing_file"', workflow)
+        self.assertIn('stat -c \'%a\' "$signing_file"', workflow)
+        self.assertIn('test -r "$RAUC_KEY_FILE"', workflow)
+        self.assertNotIn("chmod 0644", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
