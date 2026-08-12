@@ -331,6 +331,7 @@ def persist_setup(payload):
         "vpn_interface": interface,
         "dns_servers": dns_servers,
         "update_feed_url": update_feed_url,
+        "shares": {"nfs_enabled": False, "smb_enabled": False},
     }
     atomic_write(SETTINGS, json.dumps(settings, indent=2, sort_keys=True) + "\n")
     return settings, qbittorrent_password_hash(password)
@@ -469,6 +470,18 @@ def select_theme(name):
     return restart.stdout.strip() if restart.returncode else ""
 
 
+def set_share_enabled(protocol, enabled):
+    if protocol not in {"nfs", "smb"} or not isinstance(enabled, bool):
+        raise ValidationError("Invalid file-sharing setting")
+    try:
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValidationError("Complete appliance setup before enabling file sharing") from error
+    shares = settings.setdefault("shares", {})
+    shares[f"{protocol}_enabled"] = enabled
+    atomic_write(SETTINGS, json.dumps(settings, indent=2, sort_keys=True) + "\n")
+
+
 def status_payload():
     result = control("status")
     try:
@@ -539,6 +552,11 @@ def status_payload():
         "protected": services.get("vpn_protected", False),
         "can_retry": INSTALLED.exists() and not services.get("vpn_protected", False),
     }
+    shares = services.get("shares", {
+        "path": "not configured",
+        "smb": {"enabled": False, "running": False, "state": "unknown"},
+        "nfs": {"enabled": False, "running": False, "state": "unknown"},
+    })
     return {
         "installed": INSTALLED.exists(), "lan_ip": lan_ip(),
         "vpn_type": settings.get("vpn_type", "not configured"),
@@ -555,6 +573,7 @@ def status_payload():
         "data_path": settings.get("data_path", "not selected"),
         "mounts": mounted_data_paths(), "diagnostics": diagnostics,
         "release": release, "update": update, "themes": theme_status(),
+        "shares": shares,
     }
 
 
@@ -703,6 +722,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/vpn/retry",
             "/api/qbittorrent/start", "/api/qbittorrent/stop",
             "/api/qbittorrent/restart",
+            "/api/shares/smb/enable", "/api/shares/smb/disable",
+            "/api/shares/smb/restart", "/api/shares/nfs/enable",
+            "/api/shares/nfs/disable", "/api/shares/nfs/restart",
         }
         if self.path not in allowed:
             self._json(404, {"error": "not found"})
@@ -723,6 +745,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/api/qbittorrent/"):
                 self._handle_qbittorrent()
+                return
+            if self.path.startswith("/api/shares/"):
+                self._handle_share()
                 return
             settings, qbt_password = persist_setup(payload)
             vpn_result = control("vpn-start", timeout=120)
@@ -777,6 +802,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(200, {
             "ok": True,
             "message": f"qBittorrent {operation} completed",
+            "status": status_payload(),
+        })
+
+    def _handle_share(self):
+        if not INSTALLED.exists():
+            raise ValidationError("Complete appliance setup before controlling file sharing")
+        _, _, _, protocol, operation = self.path.split("/")
+        if protocol not in {"smb", "nfs"} or operation not in {
+                "enable", "disable", "restart"}:
+            raise ValidationError("Unsupported file-sharing operation")
+        if operation == "enable":
+            set_share_enabled(protocol, True)
+            result = control(f"{protocol}-start")
+            if result.returncode != 0:
+                set_share_enabled(protocol, False)
+                control(f"{protocol}-stop")
+        elif operation == "disable":
+            set_share_enabled(protocol, False)
+            result = control(f"{protocol}-stop")
+        else:
+            if not status_payload().get("shares", {}).get(protocol, {}).get("enabled"):
+                raise ValidationError(f"Enable {protocol.upper()} before restarting it")
+            control(f"{protocol}-stop")
+            result = control(f"{protocol}-start")
+        if result.returncode != 0:
+            raise ValidationError(
+                result.stdout.strip() or f"{protocol.upper()} {operation} failed")
+        self._json(200, {
+            "ok": True,
+            "message": f"{protocol.upper()} {operation} completed",
             "status": status_payload(),
         })
 

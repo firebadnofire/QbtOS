@@ -44,12 +44,18 @@ Malformed or misspelled reachable revision tags make the release fail. Every
 `revision-N` push starts `.forgejo/workflows/release.yml`; the job independently
 validates the exact tag before building.
 
-RAUC uses CMS/X.509 signatures. `RAUC_CERT_FILE` contains only the trusted
-release certificate and `RAUC_KEY_FILE` its private signing key. The additional
-OpenPGP layer uses a public keyring supplied as `QBTOS_GPG_KEYRING_FILE`; CI
+RAUC uses CMS/X.509 signatures. The public hierarchy in `ca/` is built into the
+image: `root-ca.pem` is the immutable RAUC trust anchor,
+`intermediate-ca.pem` is included with signed bundles, and `release.crt`
+identifies the permitted pre-production signer. `RAUC_CERT_FILE` must contain
+that release certificate and `RAUC_KEY_FILE` its matching private signing key.
+The additional OpenPGP layer uses a public keyring supplied as
+`QBTOS_GPG_KEYRING_FILE`; CI
 derives it from `CI_KEY`, clear-signs the required `.sha256` artifact using
 `CI_KEY_PASSPHRASE`, and verifies the signature and hashes before upload.
-Neither private key enters the image.
+Neither private key enters the image. This dedicated CA is not installed in
+the system TLS store; normal HTTPS continues to use only Buildroot's Mozilla
+CA bundle. RAUC verifies the leaf with `check-purpose=codesign`.
 
 ```sh
 eval "$(./build-scripts/release-version.sh)"
@@ -64,16 +70,29 @@ The command creates exactly `dist/$VERSION.img.zst`, `.raucb`,
 text; Forgejo replaces it with an ASCII clear-signed document while retaining
 the required filename.
 
-For development only, generate an isolated certificate and use
-`make development-release`:
+For development only, create an isolated, short-lived code-signing certificate
+and use `make development-release`:
 
 ```sh
 openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
-  -subj /CN=qbtOS-development -keyout dev-rauc.key -out dev-rauc.crt
+  -subj /CN=qbtOS-development \
+  -addext 'basicConstraints=critical,CA:FALSE' \
+  -addext 'keyUsage=critical,digitalSignature' \
+  -addext 'extendedKeyUsage=critical,codeSigning' \
+  -keyout dev-rauc.key -out dev-rauc.crt
 gpg --batch --export YOUR_DEVELOPMENT_KEY > dev-release-public.gpg
+eval "$(./build-scripts/release-version.sh)"
+make development-release VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" \
+  REVISION="$REVISION" SOURCE_TAG="$SOURCE_TAG" COMMIT="$COMMIT" \
+  RAUC_CERT_FILE=dev-rauc.crt RAUC_KEY_FILE=dev-rauc.key \
+  QBTOS_GPG_KEYRING_FILE=dev-release-public.gpg
 ```
 
-Never reuse a development trust root for production.
+The resulting development image trusts only that development certificate. The
+current pre-production image trusts only the checked-in pre-production root; a
+future production image must use a separate production root and signer. Never
+reuse a development key for pre-production or production, and never put any
+private signing key in this repository or an image.
 
 ## Feed, installation, and recovery
 

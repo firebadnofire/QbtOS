@@ -94,6 +94,23 @@
     <p id="vpn-message" aria-live="polite"></p>
   </section>
 
+  <section id="file-sharing" hidden>
+    <h2>LAN file sharing</h2>
+    <p>SMB and NFS expose only the persistent downloads directory. Access is
+       unauthenticated for trusted LAN source addresses and denied on VPN and
+       all other interfaces. Both services are disabled by default.</p>
+    <dl id="share-status"><dt>State</dt><dd>Loading…</dd></dl>
+    <h3>SMB</h3>
+    <button type="button" id="enable-smb">Enable</button>
+    <button type="button" class="secondary" id="disable-smb">Disable</button>
+    <button type="button" class="secondary" id="restart-smb">Restart</button>
+    <h3>NFSv4</h3>
+    <button type="button" id="enable-nfs">Enable</button>
+    <button type="button" class="secondary" id="disable-nfs">Disable</button>
+    <button type="button" class="secondary" id="restart-nfs">Restart</button>
+    <p id="share-message" aria-live="polite"></p>
+  </section>
+
   <section id="themes" hidden>
     <h2>qBittorrent themes</h2>
     <p>Themes live on persistent storage at <code>/themes</code>. Install only
@@ -136,6 +153,7 @@
   const themeMessage = document.querySelector('#theme-message');
   const qbittorrentMessage = document.querySelector('#qbittorrent-message');
   const vpnMessage = document.querySelector('#vpn-message');
+  const shareMessage = document.querySelector('#share-message');
   document.querySelector('#vpn_file').addEventListener('change', async event => {
     const file = event.target.files[0];
     if (file) document.querySelector('#vpn_config').value = await file.text();
@@ -177,6 +195,11 @@
     const vpn = status.vpn || {
       protected: status.vpn_protected, can_retry: status.installed && !status.vpn_protected
     };
+    const shares = status.shares || {
+      path: 'not configured',
+      smb: {enabled: false, running: false, state: 'unknown'},
+      nfs: {enabled: false, running: false, state: 'unknown'}
+    };
     document.querySelector('#status').innerHTML = `
       <dt>LAN IPv4</dt><dd>${escapeText(status.lan_ip)}</dd>
       <dt>System version</dt><dd>${escapeText(release.version || 'unknown')}</dd>
@@ -204,6 +227,7 @@
     form.hidden = status.installed;
     document.querySelector('#setup-complete').hidden = !status.installed;
     document.querySelector('#qbittorrent-service').hidden = !status.installed;
+    document.querySelector('#file-sharing').hidden = !status.installed;
     document.querySelector('#themes').hidden = !status.installed;
     document.querySelector('#qbittorrent-status').innerHTML = `
       <dt>State</dt><dd class="${qbittorrent.running ? 'good' : 'bad'}">${escapeText(qbittorrent.state || 'unknown')}</dd>
@@ -214,6 +238,16 @@
     document.querySelector('#stop-qbittorrent').disabled = !qbittorrent.can_stop;
     document.querySelector('#restart-qbittorrent').disabled = !qbittorrent.can_stop;
     document.querySelector('#retry-vpn').disabled = !vpn.can_retry;
+    document.querySelector('#share-status').innerHTML = `
+      <dt>Directory</dt><dd>${escapeText(shares.path)}</dd>
+      <dt>SMB</dt><dd class="${shares.smb.running ? 'good' : ''}">${escapeText(shares.smb.state)}${shares.smb.enabled ? ' (enabled)' : ' (disabled)'}</dd>
+      <dt>NFSv4</dt><dd class="${shares.nfs.running ? 'good' : ''}">${escapeText(shares.nfs.state)}${shares.nfs.enabled ? ' (enabled)' : ' (disabled)'}</dd>`;
+    document.querySelector('#enable-smb').disabled = shares.smb.enabled;
+    document.querySelector('#disable-smb').disabled = !shares.smb.enabled;
+    document.querySelector('#restart-smb').disabled = !shares.smb.enabled;
+    document.querySelector('#enable-nfs').disabled = shares.nfs.enabled;
+    document.querySelector('#disable-nfs').disabled = !shares.nfs.enabled;
+    document.querySelector('#restart-nfs').disabled = !shares.nfs.enabled;
     const themeState = status.themes || {active: '', items: []};
     const selector = document.querySelector('#theme_select');
     selector.innerHTML = '<option value="">Built-in qBittorrent UI</option>' +
@@ -260,6 +294,30 @@
     }
   }
   document.querySelector('#retry-vpn').addEventListener('click', retryVpn);
+  async function shareCall(protocol, operation) {
+    shareMessage.className = '';
+    shareMessage.textContent = `Requesting ${protocol.toUpperCase()} ${operation}…`;
+    try {
+      const response = await fetch(`/api/shares/${protocol}/${operation}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `${protocol.toUpperCase()} ${operation} failed`);
+      shareMessage.className = 'good';
+      shareMessage.textContent = result.message;
+      render(result.status);
+    } catch (error) {
+      shareMessage.className = 'bad';
+      shareMessage.textContent = error.message;
+      fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
+    }
+  }
+  for (const protocol of ['smb', 'nfs']) {
+    for (const operation of ['enable', 'disable', 'restart']) {
+      document.querySelector(`#${operation}-${protocol}`).addEventListener(
+        'click', () => shareCall(protocol, operation));
+    }
+  }
   async function themeCall(path, body) {
     themeMessage.className = '';
     themeMessage.textContent = 'Working…';

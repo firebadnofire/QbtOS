@@ -2,7 +2,7 @@
 /output/
 /dl/
 /.build-log*
-
+/ca/*
 # Generated images, compiler products, and test caches
 *.img
 *.iso
@@ -18,6 +18,9 @@ __pycache__/
 *.key
 *.pem
 *.crt
+!/ca/
+!/ca/*.pem
+!/ca/*.crt
 *.ovpn
 wg*.conf
 /*-wg-*.conf

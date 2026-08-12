@@ -104,6 +104,30 @@ class ValidationTests(unittest.TestCase):
         self.assertIn('control("vpn-start", timeout=120)', source)
         self.assertIn('control("qbt-start")', source)
 
+    def test_installed_ui_controls_lan_file_shares(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        config = CONFIG_IN_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('id="file-sharing"', page)
+        self.assertIn("shareCall(protocol, operation)", page)
+        self.assertIn("/api/shares/smb/enable", source)
+        self.assertIn("/api/shares/nfs/enable", source)
+        self.assertIn("select BR2_PACKAGE_SAMBA4", config)
+        self.assertIn("select BR2_PACKAGE_NFS_UTILS_NFSV4", config)
+
+    def test_share_enablement_is_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Path(directory) / "settings.json"
+            settings.write_text('{"version": 1}\n', encoding="utf-8")
+            with mock.patch.object(manager, "SETTINGS", settings):
+                manager.set_share_enabled("smb", True)
+                manager.set_share_enabled("nfs", False)
+
+            value = manager.json.loads(settings.read_text(encoding="utf-8"))
+            self.assertTrue(value["shares"]["smb_enabled"])
+            self.assertFalse(value["shares"]["nfs_enabled"])
+
     def test_atomic_write_syncs_parent_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "state" / "installed"

@@ -92,11 +92,31 @@ same development certificate warning is expected. Verify protection status
 before adding torrents. Detailed setup, diagnostics, and always-on 115200-baud
 GPIO UART instructions are in [docs/FIRST_BOOT.md](docs/FIRST_BOOT.md).
 
+The public X.509 hierarchy under `ca/` is included in every base image solely
+for update authentication. `root-ca.pem` is installed as RAUC's immutable
+`/etc/rauc/keyring.pem`; the intermediate chain and code-signing leaf are
+retained under `/usr/share/qbtos/ca` for inspection. RAUC enforces the
+`codeSigning` certificate purpose. The qbtOS CA is never added to the system
+TLS CA bundle, and no private signing key is included.
+
 After installation, the management UI can install qBittorrent alternative Web
 UI themes from public, credential-free HTTPS Git URLs, update them atomically,
 and switch between installed themes and qBittorrent's built-in UI. Theme files
 are persistent at `/themes`, backed by the selected data filesystem. A theme is
 accepted only when it contains `public/index.html` and no symbolic links.
+
+The management UI also provides independently controlled SMB and NFSv4 shares
+for the persistent `downloads` directory. Both services are disabled by
+default. When enabled, clients on the trusted IPv4 LAN ranges can read and
+write without credentials; clients arriving over the VPN or from any other
+source are denied. This is source-network trust, not user authentication, so
+enable sharing only on a LAN you control. SMB is available as
+`\\qbtos\downloads` on TCP port 445. NFSv4 exports the directory as the
+pseudofilesystem root and can be mounted with, for example:
+
+```bash
+sudo mount -t nfs4 qbtos:/ /mnt/qbtos-downloads
+```
 
 ## QEMU development
 

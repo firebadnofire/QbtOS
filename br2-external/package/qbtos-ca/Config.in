@@ -1,0 +1,6 @@
+config BR2_PACKAGE_QBTOS_CA
+	bool "qbtOS public trust material"
+	help
+	  Install the qbtOS release-signing certificate hierarchy and
+	  immutable RAUC trust anchor. Keep these certificates out of
+	  the system-wide TLS trust store.

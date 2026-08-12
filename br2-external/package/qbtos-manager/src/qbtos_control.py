@@ -4,6 +4,7 @@
 
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,10 @@ QBT_PID = Path("/run/qbittorrent.pid")
 QBT_CONFIG = STATE_ROOT / "qbittorrent/qBittorrent/config/qBittorrent.conf"
 CLOCK_EPOCH = STATE_ROOT / "state/clock-epoch"
 OVPN_PID = Path("/run/openvpn-qbtos.pid")
+SMB_RUNTIME = Path("/run/qbtos-samba")
+SMB_CONFIG = Path("/run/qbtos-smb.conf")
+SMB_PID = SMB_RUNTIME / "smbd.pid"
+NFSD_THREADS = Path("/proc/fs/nfsd/threads")
 RESOLV = Path("/run/resolv.conf")
 RESOLV_BACKUP = Path("/run/resolv.conf.before-vpn")
 LAN_NETWORKS = (
@@ -100,7 +105,8 @@ def mounted_filesystem(path):
 
 def persistent_data_status(settings=None):
     try:
-        settings = settings or load_settings()
+        if settings is None:
+            settings = load_settings()
         data_path = Path(settings["data_path"]).resolve(strict=True)
     except (OSError, KeyError, json.JSONDecodeError):
         return False, "persistent data path is not configured"
@@ -112,6 +118,175 @@ def persistent_data_status(settings=None):
     if "rw" not in mounted[3] or not os.access(data_path, os.W_OK):
         return False, f"{data_path} is not writable"
     return True, f"{data_path} is writable on {mounted[2]}"
+
+
+def downloads_path(settings=None):
+    """Return the configured downloads directory after storage validation."""
+    if settings is None:
+        settings = load_settings()
+    ready, message = persistent_data_status(settings)
+    if not ready:
+        raise RuntimeError(f"file sharing refused: {message}")
+    path = (Path(settings["data_path"]).resolve(strict=True) / "downloads")
+    if not path.is_dir() or path.is_symlink() or not os.access(path, os.W_OK):
+        raise RuntimeError("file sharing refused: downloads directory is unavailable")
+    return path
+
+
+def share_enabled(protocol, settings=None):
+    if settings is None:
+        settings = load_settings()
+    return settings.get("shares", {}).get(f"{protocol}_enabled") is True
+
+
+def write_smb_config(path):
+    SMB_RUNTIME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for directory in ("lock", "state", "cache", "private"):
+        (SMB_RUNTIME / directory).mkdir(mode=0o700, exist_ok=True)
+    allowed = " ".join(LAN_NETWORKS)
+    config = f"""[global]
+bind interfaces only = yes
+cache directory = {SMB_RUNTIME}/cache
+disable netbios = yes
+dns proxy = no
+guest account = qbtos-qbt
+hosts allow = {allowed}
+hosts deny = 0.0.0.0/0
+interfaces = lo eth0
+load printers = no
+lock directory = {SMB_RUNTIME}/lock
+logging = file
+log file = /run/qbtos-samba/log.%m
+map to guest = Bad User
+max log size = 256
+mdns name = disabled
+ntlm auth = disabled
+pid directory = {SMB_RUNTIME}
+printcap name = /dev/null
+printing = bsd
+private dir = {SMB_RUNTIME}/private
+security = user
+server min protocol = SMB2_02
+server role = standalone server
+server services = smb
+smb ports = 445
+state directory = {SMB_RUNTIME}/state
+
+[downloads]
+comment = qbtOS downloads
+force group = qbtos-qbt
+force user = qbtos-qbt
+guest ok = yes
+path = {path}
+read only = no
+"""
+    SMB_CONFIG.write_text(config, encoding="utf-8")
+    SMB_CONFIG.chmod(0o600)
+
+
+def smb_stop():
+    if SMB_PID.exists():
+        run(["/sbin/start-stop-daemon", "-K", "-q", "-p", str(SMB_PID)], check=False)
+    run(["/usr/bin/killall", "-q", "smbd"], check=False)
+    SMB_PID.unlink(missing_ok=True)
+
+
+def smb_start():
+    settings = load_settings()
+    if not INSTALLED.exists() or not share_enabled("smb", settings):
+        smb_stop()
+        return
+    path = downloads_path(settings)
+    if process_alive(SMB_PID):
+        return
+    write_smb_config(path)
+    run(["/usr/sbin/smbd", "-D", "-s", str(SMB_CONFIG)])
+    time.sleep(1)
+    if not process_alive(SMB_PID):
+        raise RuntimeError("SMB daemon exited during startup")
+
+
+def nfs_running():
+    try:
+        return int(NFSD_THREADS.read_text(encoding="ascii").strip()) > 0
+    except (OSError, ValueError):
+        return False
+
+
+def nfs_stop():
+    run(["/usr/sbin/exportfs", "-au"], check=False)
+    # Do not let rpc.nfsd fall back to NFSv3 while stopping. qbtOS does not
+    # run rpcbind, so the default version negotiation fails with ECONNREFUSED.
+    # Avoid invoking rpc.nfsd at all on the first start, before nfsd is mounted.
+    if NFSD_THREADS.exists():
+        run(["/usr/sbin/rpc.nfsd", "-N", "3", "-V", "4", "0"], check=False)
+    run(["/usr/bin/killall", "-q", "rpc.mountd"], check=False)
+
+
+def export_nfs_path(path, options):
+    """Install each client export, retrying once after nfsd's first mount."""
+    for network in LAN_NETWORKS:
+        command = [
+            "/usr/sbin/exportfs", "-i", "-o", options, f"{network}:{path}",
+        ]
+        result = run(command, check=False, capture=True)
+        if result.returncode != 0:
+            # Some kernels briefly reject the first export immediately after
+            # the nfsd pseudo-filesystem is mounted. The operation is
+            # idempotent, so one bounded retry is safe and deterministic.
+            time.sleep(0.1)
+            result = run(command, check=False, capture=True)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "exportfs returned no diagnostic"
+            raise RuntimeError(f"NFS export failed for {network}: {detail}")
+
+
+def nfs_start():
+    settings = load_settings()
+    if not INSTALLED.exists() or not share_enabled("nfs", settings):
+        nfs_stop()
+        return
+    path = downloads_path(settings)
+    nfs_stop()
+    account = pwd.getpwnam("qbtos-qbt")
+    options = (
+        "rw,sync,no_subtree_check,all_squash,root_squash,"
+        f"anonuid={account.pw_uid},anongid={account.pw_gid},fsid=0"
+    )
+    Path("/run/nfs/sm").mkdir(mode=0o700, parents=True, exist_ok=True)
+    Path("/run/nfs/sm.bak").mkdir(mode=0o700, parents=True, exist_ok=True)
+    run(["/sbin/modprobe", "nfsd"], check=False)
+    if not Path("/proc/fs/nfsd/exports").exists():
+        run(["/bin/mount", "-t", "nfsd", "nfsd", "/proc/fs/nfsd"])
+    export_nfs_path(path, options)
+    # NFSv4 clients use only TCP/2049 and do not contact mountd, but the kernel
+    # still needs the local mountd process to answer export-cache upcalls.
+    # Keep its network protocol set v4-only and disable UDP; the firewall does
+    # not expose mountd's ancillary listeners.
+    run(["/usr/sbin/rpc.mountd", "-V", "4", "-u"])
+    # NFSv2 is absent from the kernel, so asking rpc.nfsd to disable it is
+    # itself an error with current nfs-utils; explicitly disable only v3.
+    run(["/usr/sbin/rpc.nfsd", "-N", "3", "-V", "4", "-t", "-U", "4"])
+    if not nfs_running():
+        nfs_stop()
+        raise RuntimeError("NFS daemon exited during startup")
+
+
+def shares_start():
+    """Restore each independently enabled LAN share after persistent mounts."""
+    errors = []
+    for name, start in (("SMB", smb_start), ("NFS", nfs_start)):
+        try:
+            start()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            errors.append(f"{name}: {error}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+def shares_stop():
+    smb_stop()
+    nfs_stop()
 
 
 def qbt_stop():
@@ -372,6 +547,12 @@ def status():
             pid = int(QBT_PID.read_text(encoding="ascii").strip())
         except (OSError, ValueError):
             pass
+    try:
+        settings = load_settings()
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    smb_running = process_alive(SMB_PID)
+    nfs_is_running = nfs_running()
     print(json.dumps({
         "vpn_protected": protected,
         "qbittorrent_running": running,
@@ -381,10 +562,25 @@ def status():
         "qbittorrent_pid": pid,
         "data_ready": data_ready,
         "data_message": data_message,
+        "shares": {
+            "path": (f"{settings.get('data_path')}/downloads"
+                     if settings.get("data_path") else "not configured"),
+            "smb": {
+                "enabled": share_enabled("smb", settings),
+                "running": smb_running,
+                "state": "running" if smb_running else "stopped",
+            },
+            "nfs": {
+                "enabled": share_enabled("nfs", settings),
+                "running": nfs_is_running,
+                "state": "running" if nfs_is_running else "stopped",
+            },
+        },
     }))
 
 
 def reboot_system():
+    shares_stop()
     qbt_stop()
     run(["/sbin/reboot"])
 
@@ -397,13 +593,20 @@ def main():
         "clock-save": clock_save,
         "qbt-start": qbt_start,
         "qbt-stop": qbt_stop,
+        "smb-start": smb_start,
+        "smb-stop": smb_stop,
+        "nfs-start": nfs_start,
+        "nfs-stop": nfs_stop,
+        "shares-start": shares_start,
+        "shares-stop": shares_stop,
         "status": status,
         "reboot": reboot_system,
     }
     if len(sys.argv) != 2 or sys.argv[1] not in operations:
         print(
             "usage: qbtos-control "
-            "{vpn-start|vpn-stop|vpn-check|clock-save|qbt-start|qbt-stop|status|reboot}",
+            "{vpn-start|vpn-stop|vpn-check|clock-save|qbt-start|qbt-stop|"
+            "smb-start|smb-stop|nfs-start|nfs-stop|shares-start|shares-stop|status|reboot}",
             file=sys.stderr)
         return 2
     try:

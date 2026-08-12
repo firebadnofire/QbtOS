@@ -1,0 +1,21 @@
+#!/bin/sh
+
+case "$1" in
+	start)
+		printf '%s\n' 'Starting enabled qbtOS LAN file shares...'
+		/usr/libexec/qbtos-control shares-start
+		;;
+	stop)
+		/usr/libexec/qbtos-control shares-stop
+		;;
+	restart)
+		"$0" stop
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

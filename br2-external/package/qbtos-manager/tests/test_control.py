@@ -13,6 +13,97 @@ SPEC.loader.exec_module(control)
 
 
 class ServiceControlTests(unittest.TestCase):
+    def test_firewall_exposes_shares_only_to_trusted_lan(self):
+        firewall = (
+            Path(__file__).parents[3]
+            / "board/qbtos/common/rootfs-overlay/etc/nftables-qbtos.conf"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'iifname "eth0" ip saddr @trusted_ipv4 tcp dport { 445, 2049 } accept',
+            firewall)
+        self.assertIn(
+            'iifname { "wg0", "tun0" } tcp dport { 445, 2049, 8080, 8081 } drop',
+            firewall)
+
+    def test_smb_config_is_guest_lan_only_and_exports_downloads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "samba"
+            config = Path(directory) / "smb.conf"
+            downloads = Path(directory) / "downloads"
+            downloads.mkdir()
+            with mock.patch.object(control, "SMB_RUNTIME", runtime), \
+                    mock.patch.object(control, "SMB_CONFIG", config):
+                control.write_smb_config(downloads)
+
+            value = config.read_text(encoding="utf-8")
+            self.assertIn("bind interfaces only = yes", value)
+            self.assertIn("interfaces = lo eth0", value)
+            self.assertIn("hosts deny = 0.0.0.0/0", value)
+            self.assertIn("guest ok = yes", value)
+            self.assertIn("server min protocol = SMB2_02", value)
+            self.assertIn("smb ports = 445", value)
+            self.assertIn(f"path = {downloads}", value)
+
+    def test_nfs_export_squashes_all_lan_clients_to_service_user(self):
+        settings = {
+            "data_path": "/data", "shares": {"nfs_enabled": True},
+        }
+        account = mock.Mock(pw_uid=100, pw_gid=100)
+        run_result = mock.Mock(returncode=0, stdout="")
+        with mock.patch.object(control, "load_settings", return_value=settings), \
+                mock.patch.object(control, "INSTALLED", mock.Mock(exists=lambda: True)), \
+                mock.patch.object(
+                    control, "downloads_path",
+                    return_value=Path("/data/downloads")), \
+                mock.patch.object(control, "nfs_stop"), \
+                mock.patch.object(control.pwd, "getpwnam", return_value=account), \
+                mock.patch.object(control.Path, "mkdir"), \
+                mock.patch.object(control.Path, "exists", return_value=True), \
+                mock.patch.object(control, "run", return_value=run_result) as run, \
+                mock.patch.object(control, "nfs_running", return_value=True):
+            control.nfs_start()
+
+        exports = [call.args[0] for call in run.call_args_list
+                   if call.args[0][0] == "/usr/sbin/exportfs"]
+        self.assertEqual(len(exports), len(control.LAN_NETWORKS))
+        for command in exports:
+            self.assertIn("all_squash", command[3])
+            self.assertIn("anonuid=100", command[3])
+            self.assertIn("anongid=100", command[3])
+        run.assert_any_call(
+            ["/usr/sbin/rpc.nfsd", "-N", "3", "-V", "4", "-t", "-U", "4"])
+        run.assert_any_call(["/usr/sbin/rpc.mountd", "-V", "4", "-u"])
+
+    def test_nfs_stop_does_not_initialize_an_unmounted_server(self):
+        with mock.patch.object(
+                control, "NFSD_THREADS", mock.Mock(exists=lambda: False)), \
+                mock.patch.object(control, "run") as run:
+            control.nfs_stop()
+
+        self.assertFalse(any(call.args[0][0] == "/usr/sbin/rpc.nfsd"
+                             for call in run.call_args_list))
+
+    def test_nfs_stop_is_explicitly_v4_only(self):
+        with mock.patch.object(
+                control, "NFSD_THREADS", mock.Mock(exists=lambda: True)), \
+                mock.patch.object(control, "run") as run:
+            control.nfs_stop()
+
+        run.assert_any_call(
+            ["/usr/sbin/rpc.nfsd", "-N", "3", "-V", "4", "0"], check=False)
+
+    def test_nfs_export_retries_a_transient_first_failure(self):
+        failed = mock.Mock(returncode=1, stderr="temporarily unavailable")
+        succeeded = mock.Mock(returncode=0, stderr="")
+        results = [failed, succeeded] + [succeeded] * (len(control.LAN_NETWORKS) - 1)
+        with mock.patch.object(control, "run", side_effect=results) as run, \
+                mock.patch.object(control.time, "sleep") as sleep:
+            control.export_nfs_path(Path("/data/downloads"), "rw,fsid=0")
+
+        self.assertEqual(run.call_count, len(control.LAN_NETWORKS) + 1)
+        sleep.assert_called_once_with(0.1)
+
     def test_traffic_lock_allows_only_marked_wireguard_outer_packets(self):
         firewall = (
             Path(__file__).parents[3]

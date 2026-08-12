@@ -32,6 +32,8 @@ define QBTOS_MANAGER_INSTALL_INIT_SYSV
 		$(TARGET_DIR)/etc/init.d/S50qbtos-manager
 	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S60qbtos-vpn \
 		$(TARGET_DIR)/etc/init.d/S60qbtos-vpn
+	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S65qbtos-shares \
+		$(TARGET_DIR)/etc/init.d/S65qbtos-shares
 	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S40qbtos-migrate \
 		$(TARGET_DIR)/etc/init.d/S40qbtos-migrate
 	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S95qbtos-boot-confirm \
