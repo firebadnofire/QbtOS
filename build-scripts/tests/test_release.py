@@ -13,6 +13,8 @@ RELEASE_SCRIPT = REPO / "build-scripts/release.sh"
 FORGEJO_WORKFLOW = REPO / ".forgejo/workflows/release.yml"
 FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
+CI_RUN = REPO / "build-scripts/ci-run.sh"
+CI_RELEASE = REPO / "build-scripts/ci-release.sh"
 
 
 class TemporaryRepository:
@@ -222,38 +224,54 @@ class ForgejoWorkflowTests(unittest.TestCase):
 
     def test_buildroot_release_runs_as_unprivileged_node_user(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+        ci_release = CI_RELEASE.read_text(encoding="utf-8")
 
         self.assertIn("Dependency installation UID: %s", workflow)
         self.assertIn('test "$(id -u)" -eq 0', workflow)
         self.assertIn("build_user=node", workflow)
         self.assertIn('chown -R "$build_user:$build_user" "$workspace"', workflow)
         self.assertIn('runuser --user "$build_user" -- env', workflow)
-        self.assertIn('printf "Build UID: %s\\n" "$(id -u)"', workflow)
-        self.assertIn('test "$(id -u)" -ne 0', workflow)
+        self.assertIn('[[ "$(id -u)" -ne 0 ]]', ci_release)
         self.assertNotIn("FORCE_UNSAFE_CONFIGURE", workflow)
+        self.assertNotIn("FORCE_UNSAFE_CONFIGURE", ci_release)
 
     def test_unprivileged_build_inputs_remain_private(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+        ci_release = CI_RELEASE.read_text(encoding="utf-8")
 
         self.assertIn('chgrp "$build_user" "$RUNNER_TEMP"', workflow)
         self.assertIn('chmod g+x "$RUNNER_TEMP"', workflow)
         self.assertIn('chmod 0600 "$signing_file"', workflow)
         self.assertIn('stat -c \'%a\' "$signing_file"', workflow)
-        self.assertIn('test -r "$RAUC_KEY_FILE"', workflow)
+        self.assertIn('[[ -r "$signing_file" ]]', ci_release)
         self.assertNotIn("chmod 0644", workflow)
+        self.assertNotIn("chmod 0644", ci_release)
 
-    def test_ci_suppresses_routine_build_output(self):
+    def test_ci_build_is_verbose_bounded_and_diagnosable(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
         build_script = (REPO / "build-scripts/build.sh").read_text(
             encoding="utf-8")
+        ci_run = CI_RUN.read_text(encoding="utf-8")
+        ci_release = CI_RELEASE.read_text(encoding="utf-8")
 
         self.assertIn("apt-get -qq update", workflow)
         self.assertIn("apt-get -qq install", workflow)
-        self.assertIn("QBTOS_BUILD_QUIET=1", workflow)
-        self.assertIn("make --silent --no-print-directory check", workflow)
-        self.assertIn("make --silent --no-print-directory release", workflow)
+        self.assertIn("QBTOS_BUILD_QUIET=0", workflow)
+        self.assertIn("QBTOS_BUILD_JOBS", workflow)
+        self.assertIn("QBTOS_BUILD_JOBS=\"$QBTOS_BUILD_JOBS\"", workflow)
+        self.assertIn("ci-run.sh", ci_release)
+        self.assertIn("Upload failed build diagnostics", workflow)
+        self.assertIn("ci-release.sh", workflow)
+        self.assertIn("make --silent --no-print-directory check", ci_release)
+        self.assertIn("make --silent --no-print-directory release", ci_release)
+        self.assertIn("CI phase: signed ARM64 release", ci_release)
+        self.assertIn('JOBS="$QBTOS_BUILD_JOBS"', ci_release)
         self.assertIn('QBTOS_BUILD_QUIET:-0', build_script)
         self.assertIn("buildroot_make=(make --silent --no-print-directory", build_script)
+        self.assertIn("cgroup_memory_events", ci_run)
+        self.assertIn("command_exit_status", ci_run)
+        self.assertNotIn("printenv", ci_run)
+        self.assertNotIn("env |", ci_run)
 
 
 if __name__ == "__main__":

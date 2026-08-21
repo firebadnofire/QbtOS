@@ -13,6 +13,11 @@ jobs:
     # which does not provide it by default.
     container: node:22-bookworm
     timeout-minutes: 360
+    env:
+      # Keep the cross-build within a conservative Colima VM resource budget.
+      # Increase only after measuring memory pressure on the runner host.
+      QBTOS_BUILD_JOBS: 4
+      QBTOS_CI_HEARTBEAT_SECONDS: 300
     steps:
       - name: Check out tagged source
         uses: https://data.forgejo.org/actions/checkout@v4
@@ -180,25 +185,21 @@ jobs:
             VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" REVISION="$REVISION" \
             SOURCE_TAG="$SOURCE_TAG" COMMIT="$COMMIT" \
             RUNNER_TEMP="$RUNNER_TEMP" \
-            QBTOS_BUILD_QUIET=1 \
+            QBTOS_BUILD_QUIET=0 \
+            QBTOS_BUILD_JOBS="$QBTOS_BUILD_JOBS" \
+            QBTOS_CI_HEARTBEAT_SECONDS="$QBTOS_CI_HEARTBEAT_SECONDS" \
             RAUC_CERT_FILE="$RUNNER_TEMP/rauc-release.crt" \
             RAUC_KEY_FILE="$RUNNER_TEMP/rauc-release.key" \
             QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \
-            bash -c '
-              set -euo pipefail
-              cd "$QBTOS_WORKSPACE"
-              printf "Build UID: %s\n" "$(id -u)"
-              test "$(id -u)" -ne 0
-              test -r "$RAUC_CERT_FILE"
-              test -r "$RAUC_KEY_FILE"
-              test -r "$QBTOS_GPG_KEYRING_FILE"
-              make --silent --no-print-directory check
-              make --silent --no-print-directory release \
-                VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" \
-                REVISION="$REVISION" SOURCE_TAG="$SOURCE_TAG" COMMIT="$COMMIT" \
-                RAUC_CERT_FILE="$RAUC_CERT_FILE" RAUC_KEY_FILE="$RAUC_KEY_FILE" \
-                QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE"
-            '
+            ./build-scripts/ci-release.sh
+
+      - name: Upload failed build diagnostics
+        if: failure()
+        uses: https://data.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: qbtos-release-build-diagnostics
+          path: output/ci/release-build.log
+          if-no-files-found: warn
 
       - name: Sign and verify release checksums
         shell: bash
