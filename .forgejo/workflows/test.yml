@@ -18,7 +18,7 @@ jobs:
       - name: Test repository contents API
         shell: bash
         env:
-          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          FORGEJO_TOKEN: ${{ secrets.QBT_RELEASE_KEY }}
           FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
           FORGEJO_REPOSITORY: ${{ forgejo.repository }}
         run: |

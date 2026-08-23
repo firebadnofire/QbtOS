@@ -240,7 +240,7 @@ jobs:
       - name: Publish Forgejo release and moving feed
         shell: bash
         env:
-          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          FORGEJO_TOKEN: ${{ secrets.QBT_RELEASE_KEY }}
         run: |
           set -euo pipefail
           ./build-scripts/publish-forgejo-release.sh
