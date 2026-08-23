@@ -1,6 +1,7 @@
 # Buildroot output and caches
 /output/
 /dl/
+/.ci-cache/
 /.build-log*
 /ca/*
 # Generated images, compiler products, and test caches

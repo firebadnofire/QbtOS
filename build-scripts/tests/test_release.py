@@ -15,6 +15,7 @@ FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
 CI_RUN = REPO / "build-scripts/ci-run.sh"
 CI_RELEASE = REPO / "build-scripts/ci-release.sh"
+RPI4_DEFCONFIG = REPO / "br2-external/configs/qbtos_rpi4_defconfig"
 
 
 class TemporaryRepository:
@@ -272,6 +273,39 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("command_exit_status", ci_run)
         self.assertNotIn("printenv", ci_run)
         self.assertNotIn("env |", ci_run)
+
+    def test_buildroot_caches_are_scoped_and_refreshable(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+        ci_release = CI_RELEASE.read_text(encoding="utf-8")
+        release = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        defconfig = RPI4_DEFCONFIG.read_text(encoding="utf-8")
+        cache_steps = workflow[
+            workflow.index("Restore Buildroot source downloads"):
+            workflow.index("Validate tag and derive release metadata")
+        ]
+
+        self.assertEqual(workflow.count("uses: actions/cache@v4"), 2)
+        self.assertNotIn("data.forgejo.org/actions/cache", workflow)
+        self.assertIn(".ci-cache/buildroot-dl", cache_steps)
+        self.assertIn(".ci-cache/buildroot-ccache", cache_steps)
+        self.assertIn("runner.os", cache_steps)
+        self.assertIn("runner.arch", cache_steps)
+        self.assertIn("hashFiles(", cache_steps)
+        self.assertIn("forgejo.sha", cache_steps)
+        self.assertIn("restore-keys:", cache_steps)
+        for forbidden in ("output/", "dist/", "latest.json", ".raucb", ".key", ".crt"):
+            self.assertNotIn(forbidden, cache_steps)
+
+        self.assertIn('BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl"', workflow)
+        self.assertIn(
+            'BR2_CCACHE_DIR="$workspace/.ci-cache/buildroot-ccache"', workflow)
+        self.assertIn('BR2_DL_DIR BR2_CCACHE_DIR', ci_release)
+        self.assertIn("ccache-stats", ci_release)
+        self.assertIn("if ! make --silent", ci_release)
+        self.assertIn('make -s -C "${repo_root}/buildroot" O="$release_output" distclean', release)
+        self.assertIn("BR2_CCACHE=y", defconfig)
+        self.assertIn("BR2_CCACHE_USE_BASEDIR=y", defconfig)
+        self.assertIn("FORGEJO_TOKEN: ${{ secrets.QBT_RELEASE_KEY }}", workflow)
 
 
 if __name__ == "__main__":

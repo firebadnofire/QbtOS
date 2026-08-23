@@ -38,6 +38,29 @@ jobs:
             gnupg jq libncurses-dev libssl-dev mtools patch perl \
             python3 python3-magic qemu-utils rsync shellcheck unzip wget \
             xz-utils zstd
+          install -d -m 0755 \
+            .ci-cache/buildroot-dl .ci-cache/buildroot-ccache
+
+      # Download inputs change much less often than qbtOS commits, so keep
+      # their immutable archive separate from the evolving compiler cache.
+      - name: Restore Buildroot source downloads
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/buildroot-dl
+          key: qbtos-buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('buildroot/Makefile', 'buildroot/package/**/*.mk', 'buildroot/package/**/*.hash', 'br2-external/configs/qbtos_rpi4_defconfig', 'br2-external/package/**/*.mk', 'br2-external/package/**/*.hash') }}
+          restore-keys: |
+            qbtos-buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
+
+      # The commit suffix lets a successful run save newer ccache contents.
+      # The stable toolchain/config prefix restores the newest compatible
+      # earlier entry instead of requiring an exact commit match.
+      - name: Restore Buildroot compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/buildroot-ccache
+          key: qbtos-buildroot-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('buildroot/Makefile', 'buildroot/toolchain/**', 'buildroot/package/ccache/**', 'br2-external/configs/qbtos_rpi4_defconfig') }}-${{ forgejo.sha }}
+          restore-keys: |
+            qbtos-buildroot-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('buildroot/Makefile', 'buildroot/toolchain/**', 'buildroot/package/ccache/**', 'br2-external/configs/qbtos_rpi4_defconfig') }}-
 
       - name: Validate tag and derive release metadata
         id: version
@@ -165,6 +188,12 @@ jobs:
           test "$build_uid" -ne 0
 
           chown -R "$build_user:$build_user" "$workspace"
+          for cache_dir in \
+            "$workspace/.ci-cache/buildroot-dl" \
+            "$workspace/.ci-cache/buildroot-ccache"; do
+            test -d "$cache_dir"
+            runuser --user "$build_user" -- test -w "$cache_dir"
+          done
           chgrp "$build_user" "$RUNNER_TEMP"
           chmod g+x "$RUNNER_TEMP"
           for signing_file in \
@@ -188,6 +217,8 @@ jobs:
             QBTOS_BUILD_QUIET=0 \
             QBTOS_BUILD_JOBS="$QBTOS_BUILD_JOBS" \
             QBTOS_CI_HEARTBEAT_SECONDS="$QBTOS_CI_HEARTBEAT_SECONDS" \
+            BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl" \
+            BR2_CCACHE_DIR="$workspace/.ci-cache/buildroot-ccache" \
             RAUC_CERT_FILE="$RUNNER_TEMP/rauc-release.crt" \
             RAUC_KEY_FILE="$RUNNER_TEMP/rauc-release.key" \
             QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \

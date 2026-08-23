@@ -17,8 +17,18 @@ repo_root=$(CDPATH='' cd -- "${script_dir}/.." && pwd)
 	die 'QBTOS_BUILD_JOBS must be a positive integer'
 
 for required_name in VERSION BUILD_DATE REVISION SOURCE_TAG COMMIT RUNNER_TEMP \
-	RAUC_CERT_FILE RAUC_KEY_FILE QBTOS_GPG_KEYRING_FILE; do
+	BR2_DL_DIR BR2_CCACHE_DIR RAUC_CERT_FILE RAUC_KEY_FILE \
+	QBTOS_GPG_KEYRING_FILE; do
 	[[ -n "${!required_name:-}" ]] || die "${required_name} is required"
+done
+
+[[ "$BR2_DL_DIR" == "${repo_root}/.ci-cache/buildroot-dl" ]] || \
+	die 'BR2_DL_DIR must use the workspace-local CI download cache'
+[[ "$BR2_CCACHE_DIR" == "${repo_root}/.ci-cache/buildroot-ccache" ]] || \
+	die 'BR2_CCACHE_DIR must use the workspace-local CI compiler cache'
+for cache_dir in "$BR2_DL_DIR" "$BR2_CCACHE_DIR"; do
+	[[ -d "$cache_dir" && -w "$cache_dir" ]] || \
+		die 'a required Buildroot cache directory is missing or unwritable'
 done
 
 for signing_file in \
@@ -43,4 +53,11 @@ exec "${script_dir}/ci-run.sh" output/ci/release-build.log bash -c '
 		RAUC_CERT_FILE="$RAUC_CERT_FILE" RAUC_KEY_FILE="$RAUC_KEY_FILE" \
 		QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \
 		JOBS="$QBTOS_BUILD_JOBS"
+	printf "CI phase: Buildroot ccache statistics\n"
+	if ! make --silent --no-print-directory \
+		-C "$QBTOS_WORKSPACE/buildroot" \
+		BR2_EXTERNAL="$QBTOS_WORKSPACE/br2-external" \
+		O="$QBTOS_WORKSPACE/output/release" ccache-stats; then
+		printf "Warning: Buildroot ccache statistics are unavailable.\n" >&2
+	fi
 '
