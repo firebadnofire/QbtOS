@@ -287,6 +287,13 @@ class ForgejoWorkflowTests(unittest.TestCase):
             workflow.index("Save Buildroot compiler cache"):
             workflow.index("Sign and verify release checksums")
         ]
+        compiler_save_step = save_steps[
+            save_steps.index("Save Buildroot compiler cache"):
+            save_steps.index("Save Buildroot source downloads")
+        ]
+        download_save_step = save_steps[
+            save_steps.index("Save Buildroot source downloads"):
+        ]
 
         self.assertEqual(workflow.count("uses: actions/cache/restore@v4"), 2)
         self.assertEqual(workflow.count("uses: actions/cache/save@v4"), 2)
@@ -303,11 +310,20 @@ class ForgejoWorkflowTests(unittest.TestCase):
             self.assertNotIn(forbidden, restore_steps)
             self.assertNotIn(forbidden, save_steps)
 
-        self.assertIn("steps.build-release.outcome == 'success'", save_steps)
-        self.assertIn("steps.buildroot-compiler-cache.outputs.cache-hit != 'true'", save_steps)
-        self.assertIn("steps.buildroot-download-cache.outputs.cache-hit != 'true'", save_steps)
-        self.assertIn("steps.buildroot-compiler-cache.outputs.cache-primary-key", save_steps)
-        self.assertIn("steps.buildroot-download-cache.outputs.cache-primary-key", save_steps)
+        for save_step, restore_id in (
+                (compiler_save_step, "buildroot-compiler-cache"),
+                (download_save_step, "buildroot-download-cache")):
+            expected_condition = (
+                "if: always() && "
+                "(steps.build-release.outcome == 'success' || "
+                "steps.build-release.outcome == 'failure') && "
+                f"steps.{restore_id}.outputs.cache-primary-key != '' && "
+                f"steps.{restore_id}.outputs.cache-hit != 'true'")
+            self.assertIn(expected_condition, save_step)
+            self.assertNotIn("outcome == 'skipped'", save_step)
+            self.assertIn(
+                f"key: ${{{{ steps.{restore_id}.outputs.cache-primary-key }}}}",
+                save_step)
         self.assertNotIn("upload-artifact", workflow)
 
         self.assertIn('BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl"', workflow)

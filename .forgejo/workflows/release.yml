@@ -227,18 +227,18 @@ jobs:
             QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \
             ./build-scripts/ci-release.sh
 
-      # Save immediately after a successful build so a later publishing
-      # failure cannot discard the expensive compiler work. An exact hit is
+      # Save after a completed build attempt, including a failed build, so
+      # reusable downloads and compiler work are preserved. An exact hit is
       # already immutable; a prefix restore is saved under the new primary key.
       - name: Save Buildroot compiler cache
-        if: always() && steps.build-release.outcome == 'success' && steps.buildroot-compiler-cache.outputs.cache-hit != 'true'
+        if: always() && (steps.build-release.outcome == 'success' || steps.build-release.outcome == 'failure') && steps.buildroot-compiler-cache.outputs.cache-primary-key != '' && steps.buildroot-compiler-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .ci-cache/buildroot-ccache
           key: ${{ steps.buildroot-compiler-cache.outputs.cache-primary-key }}
 
       - name: Save Buildroot source downloads
-        if: always() && steps.build-release.outcome == 'success' && steps.buildroot-download-cache.outputs.cache-hit != 'true'
+        if: always() && (steps.build-release.outcome == 'success' || steps.build-release.outcome == 'failure') && steps.buildroot-download-cache.outputs.cache-primary-key != '' && steps.buildroot-download-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .ci-cache/buildroot-dl
