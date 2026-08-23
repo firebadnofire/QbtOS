@@ -8,7 +8,7 @@ on:
 jobs:
   release:
     runs-on: [ubuntu-latest]
-    # Forgejo's JavaScript actions (checkout/upload-artifact) require Node.
+    # Forgejo's JavaScript actions (checkout/cache) require Node.
     # The ubuntu-latest runner currently launches an ubuntu:24.04 container,
     # which does not provide it by default.
     container: node:22-bookworm
@@ -44,7 +44,8 @@ jobs:
       # Download inputs change much less often than qbtOS commits, so keep
       # their immutable archive separate from the evolving compiler cache.
       - name: Restore Buildroot source downloads
-        uses: actions/cache@v4
+        id: buildroot-download-cache
+        uses: actions/cache/restore@v4
         with:
           path: .ci-cache/buildroot-dl
           key: qbtos-buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('buildroot/Makefile', 'buildroot/package/**/*.mk', 'buildroot/package/**/*.hash', 'br2-external/configs/qbtos_rpi4_defconfig', 'br2-external/package/**/*.mk', 'br2-external/package/**/*.hash') }}
@@ -55,7 +56,8 @@ jobs:
       # The stable toolchain/config prefix restores the newest compatible
       # earlier entry instead of requiring an exact commit match.
       - name: Restore Buildroot compiler cache
-        uses: actions/cache@v4
+        id: buildroot-compiler-cache
+        uses: actions/cache/restore@v4
         with:
           path: .ci-cache/buildroot-ccache
           key: qbtos-buildroot-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('buildroot/Makefile', 'buildroot/toolchain/**', 'buildroot/package/ccache/**', 'br2-external/configs/qbtos_rpi4_defconfig') }}-${{ forgejo.sha }}
@@ -179,6 +181,7 @@ jobs:
           } >> "${FORGEJO_ENV:-${GITHUB_ENV}}"
 
       - name: Check and build signed release
+        id: build-release
         shell: bash
         run: |
           set -euo pipefail
@@ -224,13 +227,22 @@ jobs:
             QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \
             ./build-scripts/ci-release.sh
 
-      - name: Upload failed build diagnostics
-        if: failure()
-        uses: https://data.forgejo.org/actions/upload-artifact@v4
+      # Save immediately after a successful build so a later publishing
+      # failure cannot discard the expensive compiler work. An exact hit is
+      # already immutable; a prefix restore is saved under the new primary key.
+      - name: Save Buildroot compiler cache
+        if: always() && steps.build-release.outcome == 'success' && steps.buildroot-compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
         with:
-          name: qbtos-release-build-diagnostics
-          path: output/ci/release-build.log
-          if-no-files-found: warn
+          path: .ci-cache/buildroot-ccache
+          key: ${{ steps.buildroot-compiler-cache.outputs.cache-primary-key }}
+
+      - name: Save Buildroot source downloads
+        if: always() && steps.build-release.outcome == 'success' && steps.buildroot-download-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-cache/buildroot-dl
+          key: ${{ steps.buildroot-download-cache.outputs.cache-primary-key }}
 
       - name: Sign and verify release checksums
         shell: bash
@@ -284,13 +296,6 @@ jobs:
         run: |
           set -euo pipefail
           ./build-scripts/publish-github-release.sh
-
-      - name: Upload release files
-        uses: https://data.forgejo.org/actions/upload-artifact@v4
-        with:
-          name: ${{ env.VERSION }}
-          path: dist/
-          if-no-files-found: error
 
       - name: Remove signing material
         if: always()

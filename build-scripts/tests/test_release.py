@@ -261,7 +261,7 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("QBTOS_BUILD_JOBS", workflow)
         self.assertIn("QBTOS_BUILD_JOBS=\"$QBTOS_BUILD_JOBS\"", workflow)
         self.assertIn("ci-run.sh", ci_release)
-        self.assertIn("Upload failed build diagnostics", workflow)
+        self.assertIn("output/ci/release-build.log", ci_release)
         self.assertIn("ci-release.sh", workflow)
         self.assertIn("make --silent --no-print-directory check", ci_release)
         self.assertIn("make --silent --no-print-directory release", ci_release)
@@ -279,22 +279,36 @@ class ForgejoWorkflowTests(unittest.TestCase):
         ci_release = CI_RELEASE.read_text(encoding="utf-8")
         release = RELEASE_SCRIPT.read_text(encoding="utf-8")
         defconfig = RPI4_DEFCONFIG.read_text(encoding="utf-8")
-        cache_steps = workflow[
+        restore_steps = workflow[
             workflow.index("Restore Buildroot source downloads"):
             workflow.index("Validate tag and derive release metadata")
         ]
+        save_steps = workflow[
+            workflow.index("Save Buildroot compiler cache"):
+            workflow.index("Sign and verify release checksums")
+        ]
 
-        self.assertEqual(workflow.count("uses: actions/cache@v4"), 2)
+        self.assertEqual(workflow.count("uses: actions/cache/restore@v4"), 2)
+        self.assertEqual(workflow.count("uses: actions/cache/save@v4"), 2)
+        self.assertNotIn("uses: actions/cache@v4", workflow)
         self.assertNotIn("data.forgejo.org/actions/cache", workflow)
-        self.assertIn(".ci-cache/buildroot-dl", cache_steps)
-        self.assertIn(".ci-cache/buildroot-ccache", cache_steps)
-        self.assertIn("runner.os", cache_steps)
-        self.assertIn("runner.arch", cache_steps)
-        self.assertIn("hashFiles(", cache_steps)
-        self.assertIn("forgejo.sha", cache_steps)
-        self.assertIn("restore-keys:", cache_steps)
+        self.assertIn(".ci-cache/buildroot-dl", restore_steps)
+        self.assertIn(".ci-cache/buildroot-ccache", restore_steps)
+        self.assertIn("runner.os", restore_steps)
+        self.assertIn("runner.arch", restore_steps)
+        self.assertIn("hashFiles(", restore_steps)
+        self.assertIn("forgejo.sha", restore_steps)
+        self.assertIn("restore-keys:", restore_steps)
         for forbidden in ("output/", "dist/", "latest.json", ".raucb", ".key", ".crt"):
-            self.assertNotIn(forbidden, cache_steps)
+            self.assertNotIn(forbidden, restore_steps)
+            self.assertNotIn(forbidden, save_steps)
+
+        self.assertIn("steps.build-release.outcome == 'success'", save_steps)
+        self.assertIn("steps.buildroot-compiler-cache.outputs.cache-hit != 'true'", save_steps)
+        self.assertIn("steps.buildroot-download-cache.outputs.cache-hit != 'true'", save_steps)
+        self.assertIn("steps.buildroot-compiler-cache.outputs.cache-primary-key", save_steps)
+        self.assertIn("steps.buildroot-download-cache.outputs.cache-primary-key", save_steps)
+        self.assertNotIn("upload-artifact", workflow)
 
         self.assertIn('BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl"', workflow)
         self.assertIn(
