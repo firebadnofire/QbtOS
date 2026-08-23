@@ -1,0 +1,54 @@
+name: Forgejo API diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+
+    steps:
+      - name: Install tools
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl jq ca-certificates
+
+      - name: Test repository contents API
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_REPOSITORY: ${{ forgejo.repository }}
+        run: |
+          set -euo pipefail
+
+          echo "Testing token identity..."
+          curl -fsS \
+            -H "Authorization: token $FORGEJO_TOKEN" \
+            "$FORGEJO_SERVER_URL/api/v1/user" |
+            jq '{id, login}'
+
+          echo "Testing repository permissions..."
+          curl -fsS \
+            -H "Authorization: token $FORGEJO_TOKEN" \
+            "$FORGEJO_SERVER_URL/api/v1/repos/$FORGEJO_REPOSITORY" |
+            jq '.permissions'
+
+          content="$(printf '%s\n' '{"ci_api_test":true}' | base64 -w0)"
+
+          jq -n \
+            --arg branch update-feed \
+            --arg content "$content" \
+            --arg message "CI Forgejo API test" \
+            '{branch:$branch,content:$content,message:$message}' \
+            >/tmp/request.json
+
+          echo "Testing contents API..."
+          curl --silent --show-error --include \
+            -X POST \
+            -H "Authorization: token $FORGEJO_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/request.json \
+            "$FORGEJO_SERVER_URL/api/v1/repos/$FORGEJO_REPOSITORY/contents/ci-api-test.json"
