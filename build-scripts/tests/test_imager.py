@@ -45,6 +45,21 @@ class ImagerTests(unittest.TestCase):
         self.assertIn('DESTROY ALL DATA?', source)
         self.assertIn('[[ "$type" == "disk" ]]', source)
 
+    def test_custom_and_compressed_images_are_supported(self):
+        source = IMAGER.read_text(encoding="utf-8")
+
+        self.assertIn('select_image() {', source)
+        self.assertIn('Enter a custom .img or .img.zst path', source)
+        self.assertIn('--image PATH', source)
+        self.assertIn('*.zst)', source)
+        self.assertIn('require_command zstd', source)
+        self.assertIn('zstd -q -d --stdout -- "$image_source_path"', source)
+        self.assertIn('trap cleanup_staged_image EXIT', source)
+        self.assertLess(
+            source.index('validate_image_layout "$image_path"'),
+            source.index('selected_device=$(select_device)'),
+        )
+
     def test_partition_refresh_handles_automount_races(self):
         source = IMAGER.read_text(encoding="utf-8")
 

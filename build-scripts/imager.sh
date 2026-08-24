@@ -16,9 +16,65 @@ Interactively select a whole block device, write the qbtOS SD image, and
 optionally create a separate ext4 or NTFS QBTOS_DATA partition after the OS.
 
 Options:
-  --image PATH  Raw qbtOS SD image (default: output/images/sdcard.img)
+  --image PATH  Raw or Zstandard-compressed qbtOS SD image
+                (default: output/images/sdcard.img)
   -h, --help    Show this help
 EOF
+}
+
+select_image() {
+	local selection custom_path
+
+	selection=$(whiptail --title "qbtOS Image" --menu \
+		"Choose the qbtOS image to write." 14 78 2 \
+		default "Default: ${default_image}" \
+		custom "Enter a custom .img or .img.zst path" \
+		3>&1 1>&2 2>&3) || return 1
+	if [[ "$selection" == "default" ]]; then
+		printf '%s\n' "$default_image"
+		return 0
+	fi
+	while true; do
+		custom_path=$(whiptail --title "Custom qbtOS Image" --inputbox \
+			"Enter the path to a qbtOS .img or .img.zst file." 10 78 "" \
+			3>&1 1>&2 2>&3) || return 1
+		if [[ -f "$custom_path" && -s "$custom_path" ]]; then
+			printf '%s\n' "$custom_path"
+			return 0
+		fi
+		whiptail --title "Invalid image" --msgbox \
+			"The image is missing or empty:\n${custom_path}" 9 72
+	done
+}
+
+cleanup_staged_image() {
+	if [[ -n "${staged_image_path:-}" ]]; then
+		rm -f -- "$staged_image_path"
+		staged_image_path=
+	fi
+}
+
+prepare_image() {
+	local source=$1
+
+	image_source_path=$(realpath "$source")
+	[[ -f "$image_source_path" && -s "$image_source_path" ]] || die \
+		"image is missing or empty: ${image_source_path}"
+	case "${image_source_path,,}" in
+		*.zst)
+			require_command zstd
+			staged_image_path=$(mktemp --suffix=.img qbtos-imager.XXXXXXXXXX)
+			printf 'Decompressing %s...\n' "$image_source_path"
+			zstd -q -d --stdout -- "$image_source_path" > "$staged_image_path" || \
+				die "could not decompress image: ${image_source_path}"
+			[[ -s "$staged_image_path" ]] || die \
+				"decompressed image is empty: ${image_source_path}"
+			image_path=$staged_image_path
+			;;
+		*)
+			image_path=$image_source_path
+			;;
+	esac
 }
 
 die() {
@@ -326,13 +382,16 @@ extend_for_data_partition() {
 main() {
 	local selected_device data_gib data_filesystem data_summary
 	local device_bytes image_bytes maximum_gib
-	image_path=$default_image
+	local requested_image=
+	image_path=
+	image_source_path=
+	staged_image_path=
 
 	while (($#)); do
 		case "$1" in
-			--image)
-				(($# >= 2)) || die "--image requires a path"
-				image_path=$2
+		--image)
+			(($# >= 2)) || die "--image requires a path"
+			requested_image=$2
 				shift 2
 				;;
 			-h|--help)
@@ -344,19 +403,28 @@ main() {
 				;;
 		esac
 	done
-	image_path=$(realpath "$image_path")
-	[[ -f "$image_path" && -s "$image_path" ]] || die \
-		"image is missing or empty: ${image_path}"
 
 	for command_name in whiptail lsblk numfmt realpath blockdev dd cmp sha256sum sfdisk \
-		awk grep sed stat tr sleep umount sync; do
+		awk grep sed stat tr sleep umount sync mktemp rm; do
 		require_command "$command_name"
 	done
 	[[ -t 0 && -t 1 ]] || die "the imager requires an interactive terminal"
 	if ((EUID != 0)); then
 		require_command sudo
-		exec sudo -- "${script_dir}/imager.sh" --image "$image_path"
+		if [[ -n "$requested_image" ]]; then
+			exec sudo -- "${script_dir}/imager.sh" --image "$requested_image"
+		else
+			exec sudo -- "${script_dir}/imager.sh"
+		fi
 	fi
+	if [[ -z "$requested_image" ]]; then
+		requested_image=$(select_image) || {
+			printf '%s\n' "Imaging cancelled."
+			return 0
+		}
+	fi
+	trap cleanup_staged_image EXIT
+	prepare_image "$requested_image"
 	validate_image_layout "$image_path"
 
 	selected_device=$(select_device) || {
@@ -393,7 +461,7 @@ main() {
 				;;
 		esac
 	fi
-	confirm_write "$selected_device" "$image_path" "$data_gib" \
+	confirm_write "$selected_device" "$image_source_path" "$data_gib" \
 		"$data_filesystem" || {
 		printf '%s\n' "Imaging cancelled."
 		return 0

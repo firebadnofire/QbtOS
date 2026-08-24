@@ -61,6 +61,18 @@ The recommended writer is the repository's interactive terminal imager:
 sudo make imager
 ```
 
+From an elevated Windows PowerShell terminal, use the native equivalent. It
+defaults the optional end partition to NTFS:
+
+```powershell
+.\build-scripts\imager.ps1
+```
+
+Both imagers offer default-image and custom-path choices in the terminal UI,
+accept raw `.img` and Zstandard-compressed `.img.zst` images, and support an
+explicit path such as `--image C:\path\to\qbtos.img.zst`. The Windows imager
+requires `zstd.exe` on `PATH` for compressed images.
+
 Select the **whole SD-card device**, not a partition. The imager identifies
 external devices and devices larger than 100 GiB, asks for destructive
 confirmation, writes and verifies the image, and optionally allocates an ext4

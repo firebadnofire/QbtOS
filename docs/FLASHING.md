@@ -7,6 +7,27 @@ disk image. The recommended interactive writer is:
 make imager
 ```
 
+On Windows, open PowerShell as Administrator and run the native terminal
+imager instead:
+
+```powershell
+.\build-scripts\imager.ps1
+```
+
+Both terminal UIs offer the default build output or a custom image path. Pass
+one directly with `--image /path/to/sdcard.img.zst` on Linux or
+`--image C:\path\to\sdcard.img.zst` on Windows. Raw `.img` and
+Zstandard-compressed `.img.zst` files are supported. Linux requires `zstd` and
+Windows requires `zstd.exe` on `PATH` for compressed input. Each imager stages
+the decompressed image in a temporary file, validates the qbtOS partition
+layout, and removes the temporary file on exit.
+
+The Windows imager otherwise uses only built-in PowerShell, .NET, and Windows
+storage facilities. It defaults to filling the available whole GiB of
+remaining space with an NTFS `QBTOS_DATA` partition; enter `0` to leave the
+space unallocated. Windows does not include an ext4 formatter, so use the Linux
+imager when an on-card ext4 data partition is required.
+
 The terminal UI requires `whiptail`, `lsblk`, `sfdisk`, and the other standard
 util-linux/coreutils tools listed by its startup checks. It also needs
 `mkfs.ext4`, or `mkfs.ntfs` when NTFS is selected. It shows every whole block
