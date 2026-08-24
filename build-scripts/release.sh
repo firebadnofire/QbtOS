@@ -14,6 +14,7 @@ dist_dir="${repo_root}/dist"
 rauc_keyring="${repo_root}/ca/root-ca.pem"
 rauc_intermediate="${repo_root}/ca/intermediate-ca.pem"
 rauc_release_cert="${repo_root}/ca/release.crt"
+qbtos_gpg_fingerprint=7D6EF134D851C8DA0862D97494F31AF374E2EE3C
 
 : "${VERSION:?VERSION is required}"
 : "${BUILD_DATE:?BUILD_DATE is required}"
@@ -60,6 +61,17 @@ test -r "$RAUC_CERT_FILE" || die 'RAUC_CERT_FILE is missing or unreadable'
 test -r "$RAUC_KEY_FILE" || die 'RAUC_KEY_FILE is missing or unreadable'
 test -r "$QBTOS_GPG_KEYRING_FILE" || \
 	die 'QBTOS_GPG_KEYRING_FILE is missing or unreadable'
+command -v gpg >/dev/null 2>&1 || \
+	die 'gpg is required to validate QBTOS_GPG_KEYRING_FILE'
+gpg_fingerprints=$(gpg --batch --show-keys --with-colons \
+	"$QBTOS_GPG_KEYRING_FILE" 2>/dev/null | \
+	awk -F: '$1 == "pub" { primary = 1; next }
+		primary && $1 == "fpr" { print toupper($10); primary = 0 }') || \
+	die 'QBTOS_GPG_KEYRING_FILE is not valid OpenPGP public key data'
+test "$(printf '%s\n' "$gpg_fingerprints" | sed '/^$/d' | wc -l)" -eq 1 || \
+	die 'QBTOS_GPG_KEYRING_FILE must contain exactly one primary OpenPGP key'
+test "$gpg_fingerprints" = "$qbtos_gpg_fingerprint" || \
+	die "QBTOS_GPG_KEYRING_FILE does not contain the trusted qbtOS key $qbtos_gpg_fingerprint"
 test -r "$rauc_keyring" || die 'embedded RAUC root CA is missing'
 test -r "$rauc_intermediate" || die 'embedded RAUC intermediate CA is missing'
 test -r "$rauc_release_cert" || die 'embedded RAUC release certificate is missing'

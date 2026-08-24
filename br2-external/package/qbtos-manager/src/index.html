@@ -16,8 +16,20 @@
     textarea { min-height: 12rem; font: .85rem ui-monospace, monospace; }
     button { width: auto; cursor: pointer; margin: .7rem .5rem 0 0; background: #1565c0; border-color: #2f7fd9; font-weight: 700; }
     button.secondary { background: #354657; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
     .warning { border-left: 5px solid #e2a72e; padding-left: 1rem; }
     .good { color: #72d59a; } .bad { color: #ff8b82; }
+    .update-summary { background: #111922; border: 1px solid #405267; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .update-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; margin-bottom: .8rem; }
+    .update-heading strong { font-size: 1.05rem; }
+    .status-pill { border-radius: 999px; background: #354657; padding: .25rem .65rem; font-size: .82rem; font-weight: 750; }
+    .status-pill.good { background: #173d2a; } .status-pill.bad { background: #572722; }
+    .status-pill.attention { color: #ffe19a; background: #4b3b17; }
+    .update-grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 1rem; margin: 0; }
+    .update-grid dd { min-width: 0; overflow-wrap: anywhere; }
+    progress { width: 100%; height: .65rem; accent-color: #2f7fd9; }
+    .button-row { display: flex; flex-wrap: wrap; gap: .7rem; }
+    .button-row button { margin-right: 0; }
     #message { white-space: pre-wrap; }
     dt { font-weight: 700; } dd { margin: 0 0 .5rem; }
     a { color: #77b7ff; }
@@ -25,7 +37,7 @@
 </head>
 <body><main>
   <h1>qbtOS development setup</h1>
-  <p class="warning"><strong>The certificate warning is expected.</strong> This development image creates a unique self-signed certificate locally. Confirm that you intentionally opened this device before accepting it. Always use <code>https://</code>; plaintext HTTP is not served on port 8080.</p>
+  <p class="warning"><strong>The certificate warning is expected.</strong> This development image creates a unique self-signed certificate locally. Confirm that you intentionally opened this device before accepting it. Plaintext HTTP on ports 8080 and 8081 redirects to the corresponding HTTPS URL.</p>
 
   <section>
     <h2>System status</h2>
@@ -71,7 +83,7 @@
       <datalist id="mounts"></datalist>
       <label for="update_feed_url">Update feed (optional)</label>
       <input id="update_feed_url" name="update_feed_url" type="url"
-             placeholder="https://UPDATE-HOST/path/latest.json">
+             value="https://raw.githubusercontent.com/firebadnofire/QbtOS/refs/heads/update-feed/latest.json">
     </section>
 
     <button type="button" class="secondary" id="test">Test VPN</button>
@@ -137,12 +149,27 @@
        slot. Installation and reboot are separate, explicit actions.</p>
     <label for="managed_update_feed_url">HTTPS latest.json feed</label>
     <input id="managed_update_feed_url" type="url"
-           placeholder="https://UPDATE-HOST/path/latest.json">
-    <button type="button" class="secondary" id="save-feed">Save feed</button>
-    <button type="button" class="secondary" id="check-update">Check</button>
-    <button type="button" class="secondary" id="download-update">Download</button>
-    <button type="button" id="install-update">Install to inactive slot</button>
-    <button type="button" id="reboot-update">Reboot into pending slot</button>
+           value="https://raw.githubusercontent.com/firebadnofire/QbtOS/refs/heads/update-feed/latest.json">
+    <div class="update-summary">
+      <div class="update-heading">
+        <span id="update-state" class="status-pill">Not checked</span>
+        <strong id="update-headline">Check for a signed system update</strong>
+      </div>
+      <dl class="update-grid">
+        <dt>Installed</dt><dd id="update-current">Unknown</dd>
+        <dt>Available</dt><dd id="update-available">Not checked</dd>
+        <dt>Last checked</dt><dd id="update-checked">Never</dd>
+        <dt>Details</dt><dd id="update-detail">No update check has completed.</dd>
+      </dl>
+      <progress id="update-progress" max="100" value="0" hidden></progress>
+    </div>
+    <div class="button-row">
+      <button type="button" class="secondary" id="save-feed">Save feed</button>
+      <button type="button" class="secondary" id="check-update">Check now</button>
+      <button type="button" class="secondary" id="download-update">Download</button>
+      <button type="button" id="install-update">Install to inactive slot</button>
+      <button type="button" id="reboot-update">Reboot into pending slot</button>
+    </div>
     <p id="update-message" aria-live="polite"></p>
   </section>
 </main>
@@ -220,10 +247,12 @@
     link.href = qbtUrl();
     link.hidden = !qbittorrent.running;
     const feed = update.feed_url || '';
-    document.querySelector('#managed_update_feed_url').value = feed;
+    const managedFeed = document.querySelector('#managed_update_feed_url');
+    if (document.activeElement !== managedFeed) managedFeed.value = feed;
     if (!document.querySelector('#update_feed_url').value) {
       document.querySelector('#update_feed_url').value = feed;
     }
+    renderUpdate(update, release);
     form.hidden = status.installed;
     document.querySelector('#setup-complete').hidden = !status.installed;
     document.querySelector('#qbittorrent-service').hidden = !status.installed;
@@ -253,6 +282,47 @@
     selector.innerHTML = '<option value="">Built-in qBittorrent UI</option>' +
       themeState.items.map(theme => `<option value="${escapeText(theme.name)}">${escapeText(theme.name)}${theme.git_managed ? ' (Git)' : ' (local)'}</option>`).join('');
     selector.value = themeState.active || '';
+  }
+  function renderUpdate(update, release) {
+    const phase = update.phase || 'idle';
+    const busy = ['checking', 'downloading', 'installing'].includes(phase);
+    let label = 'Not checked';
+    let headline = 'Check for a signed system update';
+    let tone = '';
+    if (update.reboot_pending) {
+      label = 'Reboot required'; headline = 'Update installed to the inactive slot'; tone = 'attention';
+    } else if (phase === 'downloading' || phase === 'installing') {
+      label = phase === 'downloading' ? 'Downloading' : 'Installing'; headline = update.message; tone = 'attention';
+    } else if (phase === 'failed' || phase === 'interrupted') {
+      label = phase === 'failed' ? 'Update failed' : 'Download interrupted'; headline = update.message; tone = 'bad';
+    } else if (update.download_ready) {
+      label = 'Ready to install'; headline = `${update.available_version} is downloaded and verified`; tone = 'good';
+    } else if (update.update_available) {
+      label = 'Update available'; headline = `${update.available_version} is ready to download`; tone = 'attention';
+    } else if (update.last_checked_at) {
+      label = 'Up to date'; headline = 'No newer signed release is available'; tone = 'good';
+    }
+    const state = document.querySelector('#update-state');
+    state.textContent = label;
+    state.className = `status-pill ${tone}`.trim();
+    document.querySelector('#update-headline').textContent = headline;
+    document.querySelector('#update-current').textContent = release.version || update.current_version || 'Unknown';
+    document.querySelector('#update-available').textContent = update.available_version || 'Not checked';
+    document.querySelector('#update-checked').textContent = formatTimestamp(update.last_checked_at);
+    document.querySelector('#update-detail').textContent = update.message || 'No update operation running.';
+    const progress = document.querySelector('#update-progress');
+    progress.value = Math.max(0, Math.min(100, Number(update.progress) || 0));
+    progress.hidden = !busy;
+    document.querySelector('#save-feed').disabled = busy;
+    document.querySelector('#check-update').disabled = busy;
+    document.querySelector('#download-update').disabled = busy || !update.update_available || update.download_ready;
+    document.querySelector('#install-update').disabled = busy || !update.download_ready || update.reboot_pending;
+    document.querySelector('#reboot-update').disabled = !update.reboot_pending;
+  }
+  function formatTimestamp(value) {
+    if (!value) return 'Never';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
   }
   async function qbittorrentCall(operation) {
     qbittorrentMessage.className = '';
@@ -364,6 +434,7 @@
     } catch (error) {
       updateMessage.className = 'bad';
       updateMessage.textContent = error.message;
+      fetch('/api/status').then(response => response.json()).then(render).catch(() => {});
     } finally {
       clearInterval(progressPoll);
     }

@@ -9,6 +9,7 @@ QBTOS_MANAGER_SITE = $(QBTOS_MANAGER_PKGDIR)/src
 QBTOS_MANAGER_SITE_METHOD = local
 QBTOS_MANAGER_LICENSE = GPL-3.0+
 QBTOS_MANAGER_LICENSE_FILES = qbtos_manager.py
+QBTOS_MANAGER_DEPENDENCIES = sslh
 
 define QBTOS_MANAGER_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/qbtos_manager.py \
@@ -28,6 +29,9 @@ define QBTOS_MANAGER_INSTALL_TARGET_CMDS
 endef
 
 define QBTOS_MANAGER_INSTALL_INIT_SYSV
+	$(RM) $(TARGET_DIR)/etc/init.d/S35sslh
+	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S45qbtos-web-mux \
+		$(TARGET_DIR)/etc/init.d/S45qbtos-web-mux
 	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S50qbtos-manager \
 		$(TARGET_DIR)/etc/init.d/S50qbtos-manager
 	$(INSTALL) -D -m 0755 $(QBTOS_MANAGER_PKGDIR)/S60qbtos-vpn \

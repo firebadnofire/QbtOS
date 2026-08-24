@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import importlib.util
+import http.client
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -11,6 +13,8 @@ MODULE_PATH = Path(__file__).parents[1] / "src/qbtos_manager.py"
 INDEX_PATH = MODULE_PATH.with_name("index.html")
 VPN_INIT_PATH = Path(__file__).parents[1] / "S60qbtos-vpn"
 CONFIG_IN_PATH = Path(__file__).parents[1] / "Config.in"
+PACKAGE_MK_PATH = Path(__file__).parents[1] / "qbtos-manager.mk"
+WEB_MUX_INIT_PATH = Path(__file__).parents[1] / "S45qbtos-web-mux"
 ARGON_PACKAGE = Path(__file__).parents[2] / "argon40-rust"
 PERSISTENCE_INIT_PATH = (
     Path(__file__).parents[3]
@@ -44,6 +48,22 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("select BR2_PACKAGE_LIBCURL", config)
         self.assertIn("select BR2_PACKAGE_LIBCURL_FORCE_TLS", config)
 
+    def test_sslh_multiplexes_http_and_tls_on_both_public_ports(self):
+        config = CONFIG_IN_PATH.read_text(encoding="utf-8")
+        package = PACKAGE_MK_PATH.read_text(encoding="utf-8")
+        init = WEB_MUX_INIT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("select BR2_PACKAGE_SSLH", config)
+        self.assertIn("QBTOS_MANAGER_DEPENDENCIES = sslh", package)
+        self.assertIn("$(RM) $(TARGET_DIR)/etc/init.d/S35sslh", package)
+        self.assertIn('-c nobody -x "$DAEMON"', init)
+        self.assertIn(
+            'start_mux "$MANAGER_PIDFILE" 8080 18443 18080', init)
+        self.assertIn(
+            'start_mux "$QBITTORRENT_PIDFILE" 8081 18444 18081', init)
+        self.assertIn('--on-timeout tls', init)
+        self.assertIn('sslh failed to stay running on port %s', init)
+
     def test_saved_vpn_is_restored_before_qbittorrent_init(self):
         script = VPN_INIT_PATH.read_text(encoding="utf-8")
 
@@ -69,6 +89,12 @@ class ValidationTests(unittest.TestCase):
         self.assertIn('rel="noreferrer noopener"', page)
         self.assertIn('"Referrer-Policy", "no-referrer"', source)
 
+    def test_ui_documents_plain_http_upgrade(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "Plaintext HTTP on ports 8080 and 8081 redirects", page)
+
     def test_successful_install_redirects_to_qbittorrent(self):
         page = INDEX_PATH.read_text(encoding="utf-8")
 
@@ -93,6 +119,36 @@ class ValidationTests(unittest.TestCase):
             self.assertIn(f"qbittorrentCall('{operation}')", page)
         self.assertIn('id="qbittorrent-status"', page)
         self.assertIn('status.persistence', page)
+
+    def test_update_ui_has_default_feed_status_and_action_gates(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        feed = (
+            "https://raw.githubusercontent.com/firebadnofire/QbtOS/"
+            "refs/heads/update-feed/latest.json")
+
+        self.assertEqual(manager.UPDATE_FEED_DEFAULT, feed)
+        self.assertEqual(page.count(f'value="{feed}"'), 2)
+        for element in (
+                "update-state", "update-current", "update-available",
+                "update-checked", "update-detail", "update-progress"):
+            self.assertIn(f'id="{element}"', page)
+        self.assertIn("update.update_available", page)
+        self.assertIn("update.download_ready", page)
+        self.assertIn("update.reboot_pending", page)
+        self.assertIn("formatTimestamp(update.last_checked_at)", page)
+        self.assertIn('"checking", 0, "Checking the signed update feed"', source)
+        self.assertIn('"failed", 0, f"Update check failed:', source)
+
+    def test_update_feed_api_falls_back_to_shipped_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Path(directory) / "settings.json"
+            settings.write_text('{"update_feed_url": ""}\n', encoding="utf-8")
+            with mock.patch.object(manager, "SETTINGS", settings):
+                self.assertEqual(
+                    manager.update_feed_url({}), manager.UPDATE_FEED_DEFAULT)
+                with self.assertRaises(manager.ValidationError):
+                    manager.update_feed_url({"update_feed_url": ""})
 
     def test_installed_ui_can_retry_vpn_and_start_qbittorrent(self):
         page = INDEX_PATH.read_text(encoding="utf-8")
@@ -155,10 +211,44 @@ class ValidationTests(unittest.TestCase):
             f"WebUI\\HTTPS\\CertificatePath={manager.TLS_CERT}", config)
         self.assertIn("WebUI\\HTTPS\\Enabled=true", config)
         self.assertIn(f"WebUI\\HTTPS\\KeyPath={manager.TLS_KEY}", config)
+        self.assertIn(f"WebUI\\Address={manager.LOOPBACK}", config)
+        self.assertIn(
+            f"WebUI\\Port={manager.QBITTORRENT_TLS_PORT}", config)
+        self.assertNotIn("WebUI\\Port=8081", config)
         self.assertNotIn("WebUI\\HTTPS\\Enabled=false", config)
         self.assertLess(
             config.index("WebUI\\HTTPS\\Enabled=true"),
             config.index("[Other]"))
+
+    def test_plain_http_redirect_preserves_safe_host_path_and_method(self):
+        server = manager.http.server.ThreadingHTTPServer(
+            (manager.LOOPBACK, 0), manager.RedirectHandler)
+        server.redirect_fallback_host = "192.168.1.20"
+        server.redirect_public_port = manager.MANAGER_PUBLIC_PORT
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection(*server.server_address)
+            connection.request(
+                "PROPFIND", "/api/test?value=1", body=b"ignored",
+                headers={"Host": "192.168.1.30:8080"})
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, 308)
+            self.assertEqual(
+                response.getheader("Location"),
+                "https://192.168.1.30:8080/api/test?value=1")
+            self.assertEqual(response.getheader("Cache-Control"), "no-store")
+            self.assertEqual(response.getheader("Content-Length"), "0")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_plain_http_redirect_rejects_untrusted_host_header(self):
+        self.assertEqual(
+            manager.safe_redirect_host("attacker.example:8081", "192.168.1.20"),
+            "192.168.1.20")
 
     def test_wireguard_full_tunnel_is_normalized(self):
         config = """[Interface]

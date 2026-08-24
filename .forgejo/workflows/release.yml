@@ -161,6 +161,12 @@ jobs:
             echo 'CI_KEY produced an invalid OpenPGP fingerprint' >&2
             exit 1
           fi
+          trusted_fingerprint=7D6EF134D851C8DA0862D97494F31AF374E2EE3C
+          if [[ "${fingerprint^^}" != "$trusted_fingerprint" ]]; then
+            printf 'CI_KEY fingerprint must be %s, got %s\n' \
+              "$trusted_fingerprint" "$fingerprint" >&2
+            exit 1
+          fi
 
           if [[ -n "$CI_TRUSTED_PUBLIC_KEYS" ]]; then
             if ! printf '%s' "$CI_TRUSTED_PUBLIC_KEYS" | \
@@ -170,7 +176,7 @@ jobs:
             fi
           fi
 
-          GNUPGHOME="$gnupg_home" gpg --batch --export \
+          GNUPGHOME="$gnupg_home" gpg --batch --export "$trusted_fingerprint" \
             > "$RUNNER_TEMP/qbtos-update-signing.gpg"
           [[ -s "$RUNNER_TEMP/qbtos-update-signing.gpg" ]]
           {

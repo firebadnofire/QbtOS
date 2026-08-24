@@ -199,6 +199,10 @@ def update_status(root=UPDATE_ROOT):
 
 def set_update_status(phase, progress, message, *, root=UPDATE_ROOT, **extra):
     value = {"phase": phase, "progress": int(progress), "message": str(message)[:500]}
+    previous = update_status(root)
+    for key in ("last_checked_at", "available_version", "available_revision"):
+        if key in previous:
+            value[key] = previous[key]
     value.update(extra)
     write_json(_status_path(root), value)
 

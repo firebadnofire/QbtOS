@@ -50,7 +50,8 @@ image: `root-ca.pem` is the immutable RAUC trust anchor,
 identifies the permitted pre-production signer. `RAUC_CERT_FILE` must contain
 that release certificate and `RAUC_KEY_FILE` its matching private signing key.
 The additional OpenPGP layer uses a public keyring supplied as
-`QBTOS_GPG_KEYRING_FILE`; CI
+`QBTOS_GPG_KEYRING_FILE`. Release builds accept exactly one primary key with
+fingerprint `7D6E F134 D851 C8DA 0862 D974 94F3 1AF3 74E2 EE3C`; CI
 derives it from `CI_KEY`, clear-signs the required `.sha256` artifact using
 `CI_KEY_PASSPHRASE`, and verifies the signature and hashes before upload.
 Neither private key enters the image. This dedicated CA is not installed in

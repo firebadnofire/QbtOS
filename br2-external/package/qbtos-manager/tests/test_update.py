@@ -68,6 +68,21 @@ class Response:
 
 
 class UpdateValidationTests(unittest.TestCase):
+    def test_update_status_preserves_last_check_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            update.set_update_status(
+                "available", 0, "Update available", root=directory,
+                last_checked_at="2026-08-23T20:00:00+00:00",
+                available_version="2026-08-23-rev17", available_revision=17)
+            update.set_update_status(
+                "downloading", 50, "Downloading", root=directory)
+
+            status = update.update_status(directory)
+            self.assertEqual(status["phase"], "downloading")
+            self.assertEqual(status["last_checked_at"], "2026-08-23T20:00:00+00:00")
+            self.assertEqual(status["available_version"], "2026-08-23-rev17")
+            self.assertEqual(status["available_revision"], 17)
+
     def test_openpgp_checksums_bind_feed_to_bundle(self):
         document = feed()
         checksum_text = (

@@ -4,6 +4,7 @@
 
 import base64
 import binascii
+import datetime
 import hashlib
 import hmac
 import http.server
@@ -16,6 +17,7 @@ import secrets
 import ssl
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -36,6 +38,13 @@ CONTROL = os.environ.get("QBTOS_CONTROL", "/usr/libexec/qbtos-control")
 MAX_BODY = 256 * 1024
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 SAFE_DATA_ROOTS = ("/data", "/media", "/mnt")
+MANAGER_PUBLIC_PORT = 8080
+QBITTORRENT_PUBLIC_PORT = 8081
+MANAGER_REDIRECT_PORT = 18080
+QBITTORRENT_REDIRECT_PORT = 18081
+MANAGER_TLS_PORT = 18443
+QBITTORRENT_TLS_PORT = 18444
+LOOPBACK = "127.0.0.1"
 OPENVPN_FORBIDDEN = {
     "up", "down", "route-up", "route-pre-down", "ipchange", "learn-address",
     "client-connect", "client-disconnect", "plugin", "script-security", "tls-verify",
@@ -44,7 +53,10 @@ OPENVPN_FORBIDDEN = {
 }
 OPENVPN_FILE_DIRECTIVES = {"ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "secret"}
 WG_FORBIDDEN = {"preup", "postup", "predown", "postdown"}
-UPDATE_FEED_DEFAULT = ""
+UPDATE_FEED_DEFAULT = (
+    "https://raw.githubusercontent.com/firebadnofire/QbtOS/"
+    "refs/heads/update-feed/latest.json"
+)
 
 
 class ValidationError(ValueError):
@@ -100,9 +112,11 @@ def qbittorrent_password_hash(password):
 
 def qbittorrent_https_options():
     return (
+        f"WebUI\\Address={LOOPBACK}",
         f"WebUI\\HTTPS\\CertificatePath={TLS_CERT}",
         "WebUI\\HTTPS\\Enabled=true",
         f"WebUI\\HTTPS\\KeyPath={TLS_KEY}",
+        f"WebUI\\Port={QBITTORRENT_TLS_PORT}",
     )
 
 
@@ -298,7 +312,7 @@ def persist_setup(payload):
     vpn_text = payload.get("vpn_config", "")
     vpn_username = payload.get("vpn_username", "")
     vpn_password = payload.get("vpn_password", "")
-    update_feed_url = payload.get("update_feed_url", "").strip()
+    update_feed_url = payload.get("update_feed_url", UPDATE_FEED_DEFAULT).strip()
     if update_feed_url:
         qbtos_update.validate_feed_url(update_feed_url)
     if vpn_type == "wireguard":
@@ -374,12 +388,12 @@ Accepted=true
 
 [Preferences]
 Connection\\UPnP=false
-WebUI\\Address=*
+WebUI\\Address={LOOPBACK}
 WebUI\\HTTPS\\CertificatePath={TLS_CERT}
 WebUI\\HTTPS\\Enabled=true
 WebUI\\HTTPS\\KeyPath={TLS_KEY}
 WebUI\\Password_PBKDF2=\"@ByteArray({qbt_password})\"
-WebUI\\Port=8081
+WebUI\\Port={QBITTORRENT_TLS_PORT}
 WebUI\\ServerDomains=*
 WebUI\\UseUPnP=false
 WebUI\\Username={settings['qb_username']}
@@ -520,16 +534,24 @@ def status_payload():
         "inactive_slot": inactive,
         "current_version": release["version"],
         "current_revision": release["revision"],
-        "feed_url": settings.get("update_feed_url", UPDATE_FEED_DEFAULT),
+        "feed_url": settings.get("update_feed_url") or UPDATE_FEED_DEFAULT,
     })
+    bundle_present = False
     try:
         available = json.loads(
             (qbtos_update.UPDATE_ROOT / "latest.json").read_text(encoding="utf-8"))
         update["available_version"] = available.get("version", "unknown")
         update["available_revision"] = available.get("revision", 0)
+        bundle_name = available.get("bundle_filename", "")
+        bundle_present = bool(
+            bundle_name and (qbtos_update.UPDATE_ROOT / bundle_name).is_file())
     except (OSError, json.JSONDecodeError):
         update["available_version"] = "not checked"
         update["available_revision"] = 0
+    update["update_available"] = (
+        update["available_revision"] > update["current_revision"])
+    update["download_ready"] = update["update_available"] and bundle_present
+    update["reboot_pending"] = update.get("phase") == "awaiting-reboot"
     if Path(qbtos_update.RAUC).exists():
         update["bootloader"] = qbtos_update.bootloader_state()
     else:
@@ -595,7 +617,9 @@ def update_feed_url(payload):
         settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         pass
-    value = str(payload.get("update_feed_url", settings.get("update_feed_url", ""))).strip()
+    value = str(payload.get(
+        "update_feed_url", settings.get("update_feed_url")
+        or UPDATE_FEED_DEFAULT)).strip()
     if not value:
         raise ValidationError("Configure an HTTPS latest.json update feed first")
     try:
@@ -865,12 +889,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             atomic_write(SETTINGS, json.dumps(settings, indent=2, sort_keys=True) + "\n")
             self._json(200, {"ok": True, "status": status_payload()})
         elif self.path == "/api/update/check":
-            document = qbtos_update.fetch_feed(update_feed_url(payload))
-            document = qbtos_update.validate_feed(document, qbtos_update.read_release())
-            qbtos_update.write_json(qbtos_update.UPDATE_ROOT / "latest.json", document)
+            checked_at = datetime.datetime.now(
+                datetime.timezone.utc).isoformat(timespec="seconds")
             qbtos_update.set_update_status(
-                "available", 0, f"Signed update {document['version']} is available",
-                available_version=document["version"])
+                "checking", 0, "Checking the signed update feed",
+                last_checked_at=checked_at)
+            try:
+                document = qbtos_update.fetch_feed(update_feed_url(payload))
+                release = qbtos_update.read_release()
+                document = qbtos_update.validate_feed(document, release)
+                qbtos_update.write_json(
+                    qbtos_update.UPDATE_ROOT / "latest.json", document)
+            except (qbtos_update.UpdateError, OSError) as error:
+                qbtos_update.set_update_status(
+                    "failed", 0, f"Update check failed: {error}",
+                    last_checked_at=checked_at)
+                raise
+            newer = document["revision"] > release["revision"]
+            qbtos_update.set_update_status(
+                "available" if newer else "current", 0,
+                (f"Signed update {document['version']} is available" if newer
+                 else f"System is up to date at {release['version']}"),
+                available_version=document["version"],
+                available_revision=document["revision"],
+                last_checked_at=checked_at)
             self._json(200, {"ok": True, "status": status_payload()})
         elif self.path == "/api/update/download":
             document = load_latest_update()
@@ -888,19 +930,90 @@ class Handler(http.server.BaseHTTPRequestHandler):
             control("reboot")
 
 
+def safe_redirect_host(header, fallback):
+    value = (header or "").strip()
+    if value.startswith("["):
+        closing = value.find("]")
+        candidate = value[1:closing] if closing > 0 else ""
+    else:
+        candidate = value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+    if candidate.lower() in {"qbtos", "localhost"}:
+        return candidate
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError:
+        return fallback
+    if address.is_private or address.is_loopback or address.is_link_local:
+        return f"[{candidate}]" if address.version == 6 else candidate
+    return fallback
+
+
+class RedirectHandler(http.server.BaseHTTPRequestHandler):
+    server_version = "qbtOS-https-redirect/0.1"
+
+    def __getattr__(self, name):
+        if name.startswith("do_"):
+            return self._redirect
+        raise AttributeError(name)
+
+    def log_message(self, format_string, *args):
+        super().log_message(format_string, *args)
+
+    def _redirect(self):
+        host = safe_redirect_host(
+            self.headers.get("Host"), self.server.redirect_fallback_host)
+        path = self.path if self.path.startswith("/") else "/"
+        location = f"https://{host}:{self.server.redirect_public_port}{path}"
+        self.send_response(308)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+
+def start_redirect_servers(fallback_host):
+    servers = []
+    try:
+        for backend_port, public_port in (
+                (MANAGER_REDIRECT_PORT, MANAGER_PUBLIC_PORT),
+                (QBITTORRENT_REDIRECT_PORT, QBITTORRENT_PUBLIC_PORT)):
+            server = http.server.ThreadingHTTPServer(
+                (LOOPBACK, backend_port), RedirectHandler)
+            server.redirect_fallback_host = fallback_host
+            server.redirect_public_port = public_port
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            servers.append(server)
+    except Exception:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        raise
+    return servers
+
+
 def main():
     if not Path("/config").is_mount():
         raise SystemExit("qbtOS configuration partition is not mounted; refusing ephemeral setup")
     ensure_tls()
     ensure_qbittorrent_https()
-    bind_address = wait_for_lan_ip()
+    redirect_host = wait_for_lan_ip()
+    redirect_servers = start_redirect_servers(redirect_host)
     server = http.server.ThreadingHTTPServer(
-        (bind_address, 8080), Handler)
+        (LOOPBACK, MANAGER_TLS_PORT), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(TLS_CERT, TLS_KEY)
     server.socket = context.wrap_socket(server.socket, server_side=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        for redirect_server in redirect_servers:
+            redirect_server.shutdown()
+            redirect_server.server_close()
 
 
 if __name__ == "__main__":

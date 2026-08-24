@@ -62,10 +62,11 @@ time synchronization remains future work.
 
 ## HTTPS behavior
 
-The Python TLS server safely provides HTTPS only on port 8080; it cannot detect
-and redirect plaintext HTTP on the same socket without protocol multiplexing.
-qbtOS deliberately does not implement a custom multiplexer or expose setup over
-HTTP. A request to `http://LAN-IP:8080` therefore fails rather than redirecting.
+qbtOS uses `sslh` to distinguish plaintext HTTP from TLS on ports 8080 and
+8081. TLS is forwarded to loopback-only manager and qBittorrent HTTPS backends;
+plaintext requests receive a permanent redirect to the corresponding HTTPS URL
+with the path and query preserved. The redirect service does not process setup
+credentials or proxy request bodies to an application over plaintext.
 
 ## Serial diagnostics
 

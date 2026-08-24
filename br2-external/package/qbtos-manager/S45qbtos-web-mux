@@ -1,0 +1,79 @@
+#!/bin/sh
+
+DAEMON=/usr/sbin/sslh
+MANAGER_PIDFILE=/run/qbtos-sslh-manager.pid
+QBITTORRENT_PIDFILE=/run/qbtos-sslh-qbittorrent.pid
+
+pid_is_running() {
+	pidfile="$1"
+	test -s "$pidfile" || return 1
+	pid="$(cat "$pidfile")"
+	case "$pid" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	kill -0 "$pid" 2>/dev/null
+}
+
+start_mux() {
+	pidfile="$1"
+	listen_port="$2"
+	tls_port="$3"
+	http_port="$4"
+	pid_is_running "$pidfile" && return 0
+	rm -f "$pidfile"
+	start-stop-daemon -S -q -b -m -p "$pidfile" -c nobody -x "$DAEMON" -- \
+		--foreground -n --listen "0.0.0.0:${listen_port}" \
+		--tls "127.0.0.1:${tls_port}" --http "127.0.0.1:${http_port}" \
+		--on-timeout tls || return 1
+	sleep 1
+	if ! pid_is_running "$pidfile"; then
+		printf 'qbtOS: sslh failed to stay running on port %s\n' \
+			"$listen_port" >&2
+		rm -f "$pidfile"
+		return 1
+	fi
+}
+
+stop_mux() {
+	pidfile="$1"
+	if pid_is_running "$pidfile"; then
+		start-stop-daemon -K -q -p "$pidfile" || return 1
+	fi
+	rm -f "$pidfile"
+}
+
+start() {
+	printf '%s\n' 'Starting qbtOS HTTP/HTTPS multiplexers...'
+	start_mux "$MANAGER_PIDFILE" 8080 18443 18080 || return 1
+	if ! start_mux "$QBITTORRENT_PIDFILE" 8081 18444 18081; then
+		stop_mux "$MANAGER_PIDFILE" || true
+		return 1
+	fi
+}
+
+stop() {
+	printf '%s\n' 'Stopping qbtOS HTTP/HTTPS multiplexers...'
+	status=0
+	stop_mux "$QBITTORRENT_PIDFILE" || status=1
+	stop_mux "$MANAGER_PIDFILE" || status=1
+	return "$status"
+}
+
+case "$1" in
+	start)
+		start || exit 1
+		;;
+	stop)
+		stop || exit 1
+		;;
+	restart)
+		stop || exit 1
+		start || exit 1
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+# check-package Ignore missing DAEMON Variables

@@ -93,8 +93,8 @@ manual `lsblk`/`dd`/`sync` workflow and generic imaging applications.
 3. Insert the card and power on the Pi.
 4. Find the `qbtos` DHCP lease in the router's client list.
 5. Open `https://LAN-IP:8080` and accept the expected development certificate
-   warning after verifying the device address. The `https://` scheme is
-   required; plaintext HTTP is not exposed on this port.
+   warning after verifying the device address. Plaintext HTTP on ports 8080 and
+   8081 redirects to the corresponding HTTPS URL.
 6. Set the qBittorrent administrator credentials, provide a WireGuard or
    OpenVPN configuration, select the data path, and test the VPN.
 7. Complete installation only when the manager reports active VPN protection.

@@ -115,6 +115,8 @@ class ManifestTests(unittest.TestCase):
 
 
 class ReleaseScriptTests(unittest.TestCase):
+    TRUSTED_GPG_FINGERPRINT = "7D6EF134D851C8DA0862D97494F31AF374E2EE3C"
+
     def test_rauc_uses_buildroot_host_helpers(self):
         script = RELEASE_SCRIPT.read_text(encoding="utf-8")
 
@@ -128,6 +130,19 @@ class ReleaseScriptTests(unittest.TestCase):
             '-C keyring:check-purpose=codesign bundle', script)
         self.assertIn(
             '-C keyring:check-purpose=codesign info', script)
+
+    def test_openpgp_keyring_is_pinned_before_build(self):
+        script = RELEASE_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            f"qbtos_gpg_fingerprint={self.TRUSTED_GPG_FINGERPRINT}", script)
+        self.assertIn("gpg --batch --show-keys --with-colons", script)
+        self.assertIn(
+            "must contain exactly one primary OpenPGP key", script)
+        self.assertLess(
+            script.index("gpg --batch --show-keys --with-colons"),
+            script.index('"${script_dir}/build.sh" --format flat'),
+        )
 
 
 class ForgejoWorkflowTests(unittest.TestCase):
@@ -201,8 +216,15 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("--with-colons", workflow)
         self.assertIn('"${#signing_fingerprints[@]}" -ne 1', workflow)
         self.assertIn("QBTOS_GPG_FINGERPRINT=%s", workflow)
+        self.assertIn(
+            "trusted_fingerprint=7D6EF134D851C8DA0862D97494F31AF374E2EE3C",
+            workflow,
+        )
+        self.assertIn(
+            'gpg --batch --export "$trusted_fingerprint"', workflow)
         self.assertIn("CI_TRUSTED_PUBLIC_KEYS", workflow)
-        self.assertIn('gpg --batch --export \\\n', workflow)
+        self.assertIn(
+            'gpg --batch --export "$trusted_fingerprint" \\\n', workflow)
         self.assertNotIn("--export-secret", workflow)
         self.assertIn('if: always()', workflow)
         self.assertIn(

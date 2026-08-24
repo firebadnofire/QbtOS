@@ -13,6 +13,23 @@ SPEC.loader.exec_module(control)
 
 
 class ServiceControlTests(unittest.TestCase):
+    def test_qbittorrent_https_backend_is_loopback_only(self):
+        manager_source = (
+            Path(__file__).parents[1] / "src/qbtos_manager.py"
+        ).read_text(encoding="utf-8")
+        control_source = (
+            Path(__file__).parents[1] / "src/qbtos_control.py"
+        ).read_text(encoding="utf-8")
+        firewall = (
+            Path(__file__).parents[3]
+            / "board/qbtos/common/rootfs-overlay/etc/nftables-qbtos.conf"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('WebUI\\\\Address={LOOPBACK}', manager_source)
+        self.assertIn('WebUI\\\\Port={QBITTORRENT_TLS_PORT}', manager_source)
+        self.assertIn('f"--webui-port={QBITTORRENT_TLS_PORT}"', control_source)
+        self.assertNotIn('tcp sport 8081 accept', firewall)
+
     def test_firewall_exposes_shares_only_to_trusted_lan(self):
         firewall = (
             Path(__file__).parents[3]
@@ -43,7 +60,32 @@ class ServiceControlTests(unittest.TestCase):
             self.assertIn("guest ok = yes", value)
             self.assertIn("server min protocol = SMB2_02", value)
             self.assertIn("smb ports = 445", value)
+            self.assertIn("multicast dns register = no", value)
+            self.assertNotIn("mdns name = disabled", value)
             self.assertIn(f"path = {downloads}", value)
+
+    def test_smb_start_surfaces_daemon_diagnostic(self):
+        settings = {
+            "data_path": "/data", "shares": {"smb_enabled": True},
+        }
+        failed = mock.Mock(
+            returncode=1, stdout="", stderr="invalid smb.conf directive\n")
+        with mock.patch.object(control, "load_settings", return_value=settings), \
+                mock.patch.object(
+                    control, "INSTALLED", mock.Mock(exists=lambda: True)), \
+                mock.patch.object(
+                    control, "downloads_path",
+                    return_value=Path("/data/downloads")), \
+                mock.patch.object(control, "process_alive", return_value=False), \
+                mock.patch.object(control, "write_smb_config"), \
+                mock.patch.object(control, "run", return_value=failed) as run:
+            with self.assertRaisesRegex(
+                    RuntimeError, "SMB daemon failed to start: invalid smb.conf"):
+                control.smb_start()
+
+        run.assert_called_once_with(
+            ["/usr/sbin/smbd", "-D", "-s", str(control.SMB_CONFIG)],
+            check=False, capture=True)
 
     def test_nfs_export_squashes_all_lan_clients_to_service_user(self):
         settings = {

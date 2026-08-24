@@ -33,6 +33,7 @@ LAN_NETWORKS = (
 VPN_START_TIMEOUT = 45
 LAN_START_TIMEOUT = 60
 WIREGUARD_MARK_SET = "wireguard_marks"
+QBITTORRENT_TLS_PORT = 18444
 
 
 def run(argv, *, check=True, capture=False, env=None):
@@ -159,7 +160,7 @@ logging = file
 log file = /run/qbtos-samba/log.%m
 map to guest = Bad User
 max log size = 256
-mdns name = disabled
+multicast dns register = no
 ntlm auth = disabled
 pid directory = {SMB_RUNTIME}
 printcap name = /dev/null
@@ -200,7 +201,13 @@ def smb_start():
     if process_alive(SMB_PID):
         return
     write_smb_config(path)
-    run(["/usr/sbin/smbd", "-D", "-s", str(SMB_CONFIG)])
+    result = run(
+        ["/usr/sbin/smbd", "-D", "-s", str(SMB_CONFIG)],
+        check=False, capture=True)
+    if result.returncode != 0:
+        detail = (result.stderr.strip() or result.stdout.strip()
+                  or "smbd returned no diagnostic")
+        raise RuntimeError(f"SMB daemon failed to start: {detail[-1000:]}")
     time.sleep(1)
     if not process_alive(SMB_PID):
         raise RuntimeError("SMB daemon exited during startup")
@@ -510,7 +517,8 @@ def qbt_start():
     run([
         "/sbin/start-stop-daemon", "-S", "-q", "-b", "-m",
         "-p", str(QBT_PID), "-c", "qbtos-qbt", "-x", "/usr/bin/qbittorrent-nox",
-        "--", "--profile=/config/qbtos/qbittorrent", "--webui-port=8081",
+        "--", "--profile=/config/qbtos/qbittorrent",
+        f"--webui-port={QBITTORRENT_TLS_PORT}",
     ], env={**os.environ, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
     time.sleep(2)
     if not process_alive(QBT_PID):
