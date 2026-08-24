@@ -1,6 +1,7 @@
 #!/bin/sh
 
-DAEMON=/usr/sbin/sslh
+DAEMON=qbtos-web-mux
+EXECUTABLE=/usr/sbin/sslh
 MANAGER_PIDFILE=/run/qbtos-sslh-manager.pid
 QBITTORRENT_PIDFILE=/run/qbtos-sslh-qbittorrent.pid
 
@@ -21,7 +22,8 @@ start_mux() {
 	http_port="$4"
 	pid_is_running "$pidfile" && return 0
 	rm -f "$pidfile"
-	start-stop-daemon -S -q -b -m -p "$pidfile" -c nobody -x "$DAEMON" -- \
+	start-stop-daemon -S -q -b -m -p "$pidfile" -c nobody \
+		-x "$EXECUTABLE" -- \
 		--foreground -n --listen "0.0.0.0:${listen_port}" \
 		--tls "127.0.0.1:${tls_port}" --http "127.0.0.1:${http_port}" \
 		--on-timeout tls || return 1

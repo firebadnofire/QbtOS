@@ -193,45 +193,21 @@ jobs:
           set -euo pipefail
           build_user=node
           workspace="$(pwd -P)"
-          build_uid="$(id -u "$build_user")"
-          test "$build_uid" -ne 0
+          printf 'Release preparation identity: uid=%s gid=%s user=%s\n' \
+            "$(id -u)" "$(id -g)" "$(id -un)"
+          stat -Lc 'Runner workspace: uid=%u gid=%g mode=%a path=%n' "$workspace"
+          stat -Lc 'Runner temp: uid=%u gid=%g mode=%a path=%n' "$RUNNER_TEMP"
 
-          chown -R "$build_user:$build_user" "$workspace"
-          for cache_dir in \
-            "$workspace/.ci-cache/buildroot-dl" \
-            "$workspace/.ci-cache/buildroot-ccache"; do
-            test -d "$cache_dir"
-            runuser --user "$build_user" -- test -w "$cache_dir"
-          done
-          chgrp "$build_user" "$RUNNER_TEMP"
-          chmod g+x "$RUNNER_TEMP"
-          for signing_file in \
-            "$RUNNER_TEMP/rauc-release.crt" \
-            "$RUNNER_TEMP/rauc-release.key" \
-            "$QBTOS_GPG_KEYRING_FILE"; do
-            test -s "$signing_file"
-            chown "$build_user:$build_user" "$signing_file"
-            chmod 0600 "$signing_file"
-            test "$(stat -c '%a' "$signing_file")" = 600
-          done
+          bash ./build-scripts/tests/test-release-handoff.sh "$build_user"
 
-          # Expansion inside this script must occur after runuser changes UID.
-          # shellcheck disable=SC2016
-          runuser --user "$build_user" -- env \
-            HOME="/home/$build_user" USER="$build_user" LOGNAME="$build_user" \
-            PATH="$PATH" QBTOS_WORKSPACE="$workspace" \
-            VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" REVISION="$REVISION" \
-            SOURCE_TAG="$SOURCE_TAG" COMMIT="$COMMIT" \
-            RUNNER_TEMP="$RUNNER_TEMP" \
-            QBTOS_BUILD_QUIET=0 \
-            QBTOS_BUILD_JOBS="$QBTOS_BUILD_JOBS" \
-            QBTOS_CI_HEARTBEAT_SECONDS="$QBTOS_CI_HEARTBEAT_SECONDS" \
-            BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl" \
-            BR2_CCACHE_DIR="$workspace/.ci-cache/buildroot-ccache" \
-            RAUC_CERT_FILE="$RUNNER_TEMP/rauc-release.crt" \
-            RAUC_KEY_FILE="$RUNNER_TEMP/rauc-release.key" \
-            QBTOS_GPG_KEYRING_FILE="$QBTOS_GPG_KEYRING_FILE" \
-            ./build-scripts/ci-release.sh
+          export QBTOS_WORKSPACE="$workspace"
+          export BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl"
+          export BR2_CCACHE_DIR="$workspace/.ci-cache/buildroot-ccache"
+          export RAUC_CERT_FILE="$RUNNER_TEMP/rauc-release.crt"
+          export RAUC_KEY_FILE="$RUNNER_TEMP/rauc-release.key"
+          export QBTOS_BUILD_QUIET=0
+          bash ./build-scripts/prepare-release-build.sh "$build_user" -- \
+            "$workspace/build-scripts/ci-release.sh"
 
       # Save after a completed build attempt, including a failed build, so
       # reusable downloads and compiler work are preserved. An exact hit is

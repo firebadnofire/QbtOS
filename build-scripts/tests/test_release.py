@@ -15,6 +15,8 @@ FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
 CI_RUN = REPO / "build-scripts/ci-run.sh"
 CI_RELEASE = REPO / "build-scripts/ci-release.sh"
+RELEASE_HANDOFF = REPO / "build-scripts/prepare-release-build.sh"
+RELEASE_HANDOFF_TEST = REPO / "build-scripts/tests/test-release-handoff.sh"
 RPI4_DEFCONFIG = REPO / "br2-external/configs/qbtos_rpi4_defconfig"
 
 
@@ -248,27 +250,39 @@ class ForgejoWorkflowTests(unittest.TestCase):
     def test_buildroot_release_runs_as_unprivileged_node_user(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
         ci_release = CI_RELEASE.read_text(encoding="utf-8")
+        handoff = RELEASE_HANDOFF.read_text(encoding="utf-8")
 
         self.assertIn("Dependency installation UID: %s", workflow)
         self.assertIn('test "$(id -u)" -eq 0', workflow)
         self.assertIn("build_user=node", workflow)
-        self.assertIn('chown -R "$build_user:$build_user" "$workspace"', workflow)
-        self.assertIn('runuser --user "$build_user" -- env', workflow)
+        self.assertIn("test-release-handoff.sh", workflow)
+        self.assertIn("prepare-release-build.sh", workflow)
+        self.assertIn('runuser --user "$build_user" -- env', handoff)
         self.assertIn('[[ "$(id -u)" -ne 0 ]]', ci_release)
+        self.assertNotIn('chown -R "$build_user:$build_user" "$workspace"', workflow)
+        self.assertNotIn('chown -R "$build_uid:$build_gid" "$workspace"', handoff)
         self.assertNotIn("FORCE_UNSAFE_CONFIGURE", workflow)
         self.assertNotIn("FORCE_UNSAFE_CONFIGURE", ci_release)
+        self.assertNotIn("FORCE_UNSAFE_CONFIGURE", handoff)
 
     def test_unprivileged_build_inputs_remain_private(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
         ci_release = CI_RELEASE.read_text(encoding="utf-8")
+        handoff = RELEASE_HANDOFF.read_text(encoding="utf-8")
+        handoff_test = RELEASE_HANDOFF_TEST.read_text(encoding="utf-8")
 
-        self.assertIn('chgrp "$build_user" "$RUNNER_TEMP"', workflow)
-        self.assertIn('chmod g+x "$RUNNER_TEMP"', workflow)
-        self.assertIn('chmod 0600 "$signing_file"', workflow)
-        self.assertIn('stat -c \'%a\' "$signing_file"', workflow)
+        self.assertNotIn('chgrp "$build_user" "$RUNNER_TEMP"', workflow)
+        self.assertNotIn('chmod g+x "$RUNNER_TEMP"', workflow)
+        self.assertIn("mktemp -d /tmp/qbtos-release-handoff.XXXXXX", handoff)
+        self.assertEqual(handoff.count('-m 0600 \\\n'), 3)
+        self.assertIn('trap cleanup EXIT', handoff)
+        self.assertIn("trap 'exit 1' HUP INT TERM", handoff)
+        self.assertIn('[[ ! -e "$private_copy_path" ]]', handoff_test)
+        self.assertIn('source-tree ownership changed', handoff_test)
         self.assertIn('[[ -r "$signing_file" ]]', ci_release)
         self.assertNotIn("chmod 0644", workflow)
         self.assertNotIn("chmod 0644", ci_release)
+        self.assertNotIn("chmod 0644", handoff)
 
     def test_ci_build_is_verbose_bounded_and_diagnosable(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
@@ -276,12 +290,14 @@ class ForgejoWorkflowTests(unittest.TestCase):
             encoding="utf-8")
         ci_run = CI_RUN.read_text(encoding="utf-8")
         ci_release = CI_RELEASE.read_text(encoding="utf-8")
+        handoff = RELEASE_HANDOFF.read_text(encoding="utf-8")
 
         self.assertIn("apt-get -qq update", workflow)
         self.assertIn("apt-get -qq install", workflow)
         self.assertIn("QBTOS_BUILD_QUIET=0", workflow)
         self.assertIn("QBTOS_BUILD_JOBS", workflow)
-        self.assertIn("QBTOS_BUILD_JOBS=\"$QBTOS_BUILD_JOBS\"", workflow)
+        self.assertIn(
+            'QBTOS_BUILD_JOBS="${QBTOS_BUILD_JOBS:-}"', handoff)
         self.assertIn("ci-run.sh", ci_release)
         self.assertIn("output/ci/release-build.log", ci_release)
         self.assertIn("ci-release.sh", workflow)

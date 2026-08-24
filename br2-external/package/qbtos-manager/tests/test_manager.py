@@ -56,7 +56,9 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("select BR2_PACKAGE_SSLH", config)
         self.assertIn("QBTOS_MANAGER_DEPENDENCIES = sslh", package)
         self.assertIn("$(RM) $(TARGET_DIR)/etc/init.d/S35sslh", package)
-        self.assertIn('-c nobody -x "$DAEMON"', init)
+        self.assertIn("DAEMON=qbtos-web-mux", init)
+        self.assertIn("EXECUTABLE=/usr/sbin/sslh", init)
+        self.assertIn('-x "$EXECUTABLE"', init)
         self.assertIn(
             'start_mux "$MANAGER_PIDFILE" 8080 18443 18080', init)
         self.assertIn(
