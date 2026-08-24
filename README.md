@@ -62,7 +62,7 @@ sudo make imager
 ```
 
 From an elevated Windows PowerShell terminal, use the native equivalent. It
-defaults the optional end partition to NTFS:
+offers NTFS or ext4 for the optional end partition and defaults to NTFS:
 
 ```powershell
 .\build-scripts\imager.ps1
@@ -71,7 +71,8 @@ defaults the optional end partition to NTFS:
 Both imagers offer default-image and custom-path choices in the terminal UI,
 accept raw `.img` and Zstandard-compressed `.img.zst` images, and support an
 explicit path such as `--image C:\path\to\qbtos.img.zst`. The Windows imager
-requires `zstd.exe` on `PATH` for compressed images.
+requires `zstd.exe` on `PATH` for compressed images and `mke2fs.exe` or
+`mkfs.ext4.exe` on `PATH` when ext4 is selected.
 
 Select the **whole SD-card device**, not a partition. The imager identifies
 external devices and devices larger than 100 GiB, asks for destructive

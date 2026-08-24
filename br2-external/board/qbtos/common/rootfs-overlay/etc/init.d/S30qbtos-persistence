@@ -36,9 +36,15 @@ mount_data_device() {
 		ntfs|ntfs3)
 			data_uid="$(id -u qbtos-qbt)" || return 1
 			data_gid="$(id -g qbtos-qbt)" || return 1
-			mount -t ntfs3 -o \
-				"noatime,uid=${data_uid},gid=${data_gid},umask=0077,windows_names" \
-				"$data_device" /data
+			ntfs_options="noatime,uid=${data_uid},gid=${data_gid},umask=0077,windows_names"
+			if mount -t ntfs3 -o "$ntfs_options" "$data_device" /data; then
+				return 0
+			fi
+			# A freshly formatted Windows volume can remain marked dirty. Keep
+			# the safe mount first, then recover only the labeled data volume.
+			printf '%s\n' \
+				'qbtOS: retrying QBTOS_DATA NTFS mount with dirty-volume recovery' >&2
+			mount -t ntfs3 -o "${ntfs_options},force" "$data_device" /data
 			;;
 		*)
 			mount -o noatime "$data_device" /data

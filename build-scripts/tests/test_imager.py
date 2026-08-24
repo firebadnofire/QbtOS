@@ -195,6 +195,17 @@ class ImagerTests(unittest.TestCase):
         self.assertIn("CONFIG_FEATURE_VOLUMEID_NTFS=y", busybox)
         self.assertIn("mount -t ntfs3", persistence)
         self.assertIn("windows_names", persistence)
+        safe_mount = (
+            'mount -t ntfs3 -o "$ntfs_options" "$data_device" /data'
+        )
+        recovery_mount = (
+            'mount -t ntfs3 -o "${ntfs_options},force" '
+            '"$data_device" /data'
+        )
+        self.assertLess(
+            persistence.index(safe_mount), persistence.index(recovery_mount))
+        self.assertIn("umask=0077", persistence)
+        self.assertIn("dirty-volume recovery", persistence)
 
 
 if __name__ == "__main__":

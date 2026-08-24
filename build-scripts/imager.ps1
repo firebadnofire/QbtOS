@@ -21,12 +21,97 @@ $script:AlignmentBytes = 1MB
 $script:LargeDeviceBytes = 100GB
 $script:DataLabel = 'QBTOS_DATA'
 
+if (-not ('QbtOsVolumeLock' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class QbtOsVolumeLock
+{
+    private const uint GENERIC_READ = 0x80000000;
+    private const uint GENERIC_WRITE = 0x40000000;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FSCTL_LOCK_VOLUME = 0x00090018;
+    private const uint FSCTL_DISMOUNT_VOLUME = 0x00090020;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string name, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle device, uint controlCode, IntPtr input, uint inputSize,
+        IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
+
+    public static SafeFileHandle Acquire(string path)
+    {
+        SafeFileHandle handle = CreateFile(
+            path, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero,
+            OPEN_EXISTING, 0, IntPtr.Zero);
+        if (handle.IsInvalid)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not open volume " + path);
+
+        uint returned;
+        if (!DeviceIoControl(handle, FSCTL_LOCK_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out returned, IntPtr.Zero)) {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new Win32Exception(error, "Could not lock volume " + path);
+        }
+        if (!DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out returned, IntPtr.Zero)) {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new Win32Exception(error, "Could not dismount volume " + path);
+        }
+        return handle;
+    }
+
+    public static void CopySparseImage(string sourcePath, Stream destination, long destinationOffset)
+    {
+        const int chunkSize = 4 * 1024 * 1024;
+        const int wipeSize = 16 * 1024 * 1024;
+        byte[] buffer = new byte[chunkSize];
+        byte[] zeroes = new byte[wipeSize];
+        using (FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+            int edgeSize = (int)Math.Min(wipeSize, source.Length);
+            destination.Position = destinationOffset;
+            destination.Write(zeroes, 0, edgeSize);
+            if (source.Length > edgeSize) {
+                destination.Position = destinationOffset + source.Length - edgeSize;
+                destination.Write(zeroes, 0, edgeSize);
+            }
+            long sourceOffset = 0;
+            int count;
+            while ((count = source.Read(buffer, 0, buffer.Length)) > 0) {
+                bool nonzero = false;
+                for (int index = 0; index < count; index++) {
+                    if (buffer[index] != 0) { nonzero = true; break; }
+                }
+                if (nonzero) {
+                    destination.Position = destinationOffset + sourceOffset;
+                    destination.Write(buffer, 0, count);
+                }
+                sourceOffset += count;
+            }
+        }
+        destination.Flush();
+    }
+}
+'@
+}
+
 function Show-Usage {
     @'
 Usage: build-scripts\imager.ps1 [--image PATH]
 
 Interactively select a whole disk, write the qbtOS SD image, and optionally
-create an NTFS QBTOS_DATA partition after the OS.
+create an NTFS or ext4 QBTOS_DATA partition after the OS.
 
 Options:
   --image PATH Raw or Zstandard-compressed qbtOS SD image
@@ -94,7 +179,7 @@ function Read-DataSize([UInt64] $MaximumGiB) {
             'How much free space following the OS do you want?',
             '',
             "Enter a whole number in GiB (maximum $MaximumGiB).",
-            'This creates an NTFS QBTOS_DATA partition for bootstrap and storage.',
+            'This creates a QBTOS_DATA partition for bootstrap and storage.',
             'Enter 0 to use your own USB or other external data drive.',
             'Press Ctrl+C to cancel.'
         )
@@ -105,6 +190,25 @@ function Read-DataSize([UInt64] $MaximumGiB) {
         Write-Host "Enter a whole number from 0 through $MaximumGiB." -ForegroundColor Yellow
         [void](Read-Host 'Press Enter to try again')
     }
+}
+
+function Read-DataFileSystem {
+    $items = @(
+        [pscustomobject]@{ Label = 'NTFS  Windows compatible (default)'; Value = 'NTFS' },
+        [pscustomobject]@{ Label = 'ext4  Linux native'; Value = 'ext4' }
+    )
+    $choice = Read-Menu 'qbtOS Data Filesystem' 'Choose the filesystem for QBTOS_DATA.' $items 0
+    if (-not $choice) { return $null }
+    return $choice.Value
+}
+
+function Resolve-Ext4Formatter {
+    $formatter = Get-Command mke2fs.exe, mkfs.ext4.exe, mke2fs, mkfs.ext4 `
+        -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $formatter) {
+        throw 'Creating ext4 requires mke2fs.exe or mkfs.ext4.exe on PATH. Install a Windows e2fsprogs build, then retry.'
+    }
+    return $formatter.Source
 }
 
 function Read-ImagePath {
@@ -180,11 +284,11 @@ function Resolve-ImagerImage([string] $RequestedPath) {
 }
 
 function Confirm-DestructiveWrite {
-    param([object] $Disk, [string] $ImagePath, [UInt64] $DataGiB, [string[]] $Volumes)
+    param([object] $Disk, [string] $ImagePath, [UInt64] $DataGiB, [string] $DataFileSystem, [string[]] $Volumes)
     $dataSummary = if ($DataGiB -eq 0) {
         'No on-device QBTOS_DATA partition will be created.'
     } else {
-        "A $DataGiB GiB QBTOS_DATA NTFS partition will be created."
+        "A $DataGiB GiB QBTOS_DATA $DataFileSystem partition will be created."
     }
     Clear-Host
     Show-Panel 'DESTROY ALL DATA?' @(
@@ -261,7 +365,13 @@ function Test-QbtOsImageLayout([string] $Path) {
 }
 
 function Add-QbtOsDataPartition {
-    param([System.IO.Stream] $Stream, [UInt64] $ImageBytes, [UInt64] $DataBytes)
+    param(
+        [System.IO.Stream] $Stream,
+        [UInt64] $ImageBytes,
+        [UInt64] $DataBytes,
+        [ValidateSet('NTFS', 'ext4')]
+        [string] $DataFileSystem = 'NTFS'
+    )
     if (($ImageBytes % 512) -ne 0 -or ($DataBytes % 512) -ne 0) { throw 'Partition sizes must be sector-aligned.' }
     $imageSectors = [UInt64]($ImageBytes / 512)
     $dataSectors = [UInt64]($DataBytes / 512)
@@ -294,7 +404,7 @@ function Add-QbtOsDataPartition {
     $entryOffset = 446
     $dataEbr[$entryOffset] = 0
     $dataEbr[$entryOffset + 1] = 0xFE; $dataEbr[$entryOffset + 2] = 0xFF; $dataEbr[$entryOffset + 3] = 0xFF
-    $dataEbr[$entryOffset + 4] = 0x07
+    $dataEbr[$entryOffset + 4] = if ($DataFileSystem -eq 'NTFS') { 0x07 } else { 0x83 }
     $dataEbr[$entryOffset + 5] = 0xFE; $dataEbr[$entryOffset + 6] = 0xFF; $dataEbr[$entryOffset + 7] = 0xFF
     Set-UInt32LE $dataEbr ($entryOffset + 8) 2048
     Set-UInt32LE $dataEbr ($entryOffset + 12) ([UInt32]$dataSectors)
@@ -335,12 +445,99 @@ function Get-DiskVolumeDescriptions([UInt32] $DiskNumber) {
     return $items
 }
 
-function Dismount-DiskVolumes([UInt32] $DiskNumber) {
-    Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue | ForEach-Object {
-        $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
-        if ($volume -and $volume.DriveLetter) {
-            & mountvol.exe "$($volume.DriveLetter):\" /p | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not dismount volume $($volume.DriveLetter): on disk $DiskNumber." }
+function Lock-DiskVolumes([UInt32] $DiskNumber) {
+    $handles = [Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+    try {
+        Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue | ForEach-Object {
+            $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
+            if ($volume -and $volume.Path) {
+                $nativePath = $volume.Path.TrimEnd('\').Replace('\\?\', '\\.\')
+                $lastError = $null
+                for ($attempt = 1; $attempt -le 5; $attempt++) {
+                    try {
+                        $handles.Add([QbtOsVolumeLock]::Acquire($nativePath))
+                        $lastError = $null
+                        break
+                    } catch {
+                        $lastError = $_.Exception.Message
+                        Start-Sleep -Milliseconds 500
+                    }
+                }
+                if ($lastError) { throw "$lastError. Close applications using the volume and retry." }
+            }
+        }
+        return $handles.ToArray()
+    } catch {
+        foreach ($handle in $handles) { $handle.Dispose() }
+        throw
+    }
+}
+
+function Unlock-DiskVolumes([object[]] $Handles) {
+    foreach ($handle in $Handles) {
+        if ($handle) { $handle.Dispose() }
+    }
+}
+
+function Update-DiskLayout([UInt32] $DiskNumber) {
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Update-Disk -Number $DiskNumber -ErrorAction Stop
+            Update-HostStorageCache -ErrorAction Stop
+            return
+        } catch {
+            $lastError = $_.Exception.Message
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "Windows could not refresh PhysicalDrive$DiskNumber after five attempts: $lastError. Disconnect and reconnect the card before formatting it."
+}
+
+function Format-QbtOsDataPartition {
+    param(
+        [object] $Partition,
+        [ValidateSet('NTFS', 'ext4')]
+        [string] $DataFileSystem
+    )
+    if ($DataFileSystem -ne 'NTFS') { throw 'Windows volume formatting is only used for NTFS.' }
+    $Partition | Format-Volume -FileSystem NTFS -NewFileSystemLabel $script:DataLabel `
+        -Confirm:$false -Force -ErrorAction Stop | Out-Null
+}
+
+function Initialize-Ext4FileSystem {
+    param(
+        [System.IO.Stream] $DiskStream,
+        [UInt64] $PartitionOffset,
+        [UInt64] $PartitionBytes,
+        [string] $Ext4Formatter
+    )
+    $temporaryPath = Join-Path ([IO.Path]::GetTempPath()) ("qbtos-ext4-{0}.img" -f [Guid]::NewGuid().ToString('N'))
+    try {
+        $temporary = [IO.File]::Open($temporaryPath, 'CreateNew', 'ReadWrite', 'None')
+        $temporary.Dispose()
+        & fsutil.exe sparse setflag $temporaryPath | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not mark the ext4 staging file sparse (fsutil exit code $LASTEXITCODE)." }
+        $temporary = [IO.File]::Open($temporaryPath, 'Open', 'ReadWrite', 'None')
+        try { $temporary.SetLength([Int64]$PartitionBytes) } finally { $temporary.Dispose() }
+        & $Ext4Formatter -t ext4 -F -m 0 -L $script:DataLabel $temporaryPath
+        if ($LASTEXITCODE -ne 0) { throw "The ext4 formatter exited with code $LASTEXITCODE." }
+        Write-Host 'Writing ext4 filesystem metadata...'
+        [QbtOsVolumeLock]::CopySparseImage($temporaryPath, $DiskStream, [Int64]$PartitionOffset)
+
+        $superblock = [byte[]]::new(136)
+        $DiskStream.Position = [Int64]$PartitionOffset + 1024
+        if ($DiskStream.Read($superblock, 0, $superblock.Length) -ne $superblock.Length) {
+            throw 'Could not read back the ext4 superblock.'
+        }
+        if ([BitConverter]::ToUInt16($superblock, 56) -ne 0xEF53) {
+            throw 'The written ext4 filesystem has an invalid superblock signature.'
+        }
+        $label = [Text.Encoding]::ASCII.GetString($superblock, 120, 16).Trim([char]0)
+        if ($label -ne $script:DataLabel) { throw "The written ext4 label is invalid: $label" }
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            [IO.File]::Delete($temporaryPath)
         }
     }
 }
@@ -380,38 +577,29 @@ function Test-WrittenImage {
     param([string] $ImagePath, [System.IO.Stream] $DiskStream)
     $imageLength = (Get-Item -LiteralPath $ImagePath).Length
     $expected = Get-CurrentCachedHash $ImagePath
-    $sha = if ($expected) { [Security.Cryptography.SHA256]::Create() } else { $null }
-    $source = if ($expected) { $null } else { [IO.File]::Open($ImagePath, 'Open', 'Read', 'Read') }
+    if (-not $expected) {
+        Write-Host 'No current checksum cache; hashing the staged image...'
+        $expected = (Get-FileHash -LiteralPath $ImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
     try {
         $DiskStream.Position = 0
         $buffer = [byte[]]::new(4MB)
-        $compare = [byte[]]::new(4MB)
         [Int64] $checked = 0
         while ($checked -lt $imageLength) {
             $wanted = [Math]::Min($buffer.Length, $imageLength - $checked)
             $count = $DiskStream.Read($buffer, 0, $wanted)
             if ($count -ne $wanted) { throw "Could not read the complete written image at byte $checked." }
-            if ($expected) {
-                [void]$sha.TransformBlock($buffer, 0, $count, $null, 0)
-            } else {
-                $sourceCount = $source.Read($compare, 0, $wanted)
-                if ($sourceCount -ne $count) { throw 'Image changed while it was being verified.' }
-                for ($i = 0; $i -lt $count; $i++) {
-                    if ($buffer[$i] -ne $compare[$i]) { throw "Written image differs at byte $($checked + $i)." }
-                }
-            }
+            [void]$sha.TransformBlock($buffer, 0, $count, $null, 0)
             $checked += $count
             Write-Progress -Activity 'Verifying written OS image' -PercentComplete (($checked * 100.0) / $imageLength)
         }
-        if ($expected) {
-            [void]$sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
-            $actual = ([BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
-            if ($actual -ne $expected) { throw "Written image checksum mismatch: expected $expected, got $actual." }
-        }
+        [void]$sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
+        $actual = ([BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
+        if ($actual -ne $expected) { throw "Written image checksum mismatch: expected $expected, got $actual." }
         Write-Progress -Activity 'Verifying written OS image' -Completed
     } finally {
-        if ($sha) { $sha.Dispose() }
-        if ($source) { $source.Dispose() }
+        $sha.Dispose()
     }
 }
 
@@ -438,40 +626,52 @@ function Invoke-QbtOsImager {
     $available = [Int64]$disk.Size - $imageInfo.Length - $script:AlignmentBytes
     $maximumGiB = if ($available -gt 0) { [UInt64][Math]::Floor($available / 1GB) } else { 0 }
     $dataGiB = Read-DataSize $maximumGiB
+    $dataFileSystem = 'none'
+    $ext4Formatter = $null
+    if ($dataGiB -gt 0) {
+        $dataFileSystem = Read-DataFileSystem
+        if (-not $dataFileSystem) { Write-Host 'Imaging cancelled.'; return }
+        if ($dataFileSystem -eq 'ext4') { $ext4Formatter = Resolve-Ext4Formatter }
+    }
     $volumes = Get-DiskVolumeDescriptions $disk.Number
-    if (-not (Confirm-DestructiveWrite $disk $preparedImage.SourcePath $dataGiB $volumes)) { Write-Host 'Imaging cancelled.'; return }
+    if (-not (Confirm-DestructiveWrite $disk $preparedImage.SourcePath $dataGiB $dataFileSystem $volumes)) { Write-Host 'Imaging cancelled.'; return }
 
     $physicalPath = "\\.\PhysicalDrive$($disk.Number)"
     $stream = $null
+    $volumeLocks = @()
     try {
-        Dismount-DiskVolumes $disk.Number
-        Set-Disk -Number $disk.Number -IsOffline $true
+        $volumeLocks = @(Lock-DiskVolumes $disk.Number)
         $stream = [IO.File]::Open($physicalPath, 'Open', 'ReadWrite', 'ReadWrite')
-        Copy-ImageToStream $resolvedImage $stream
-        Test-WrittenImage $resolvedImage $stream
+        try { Copy-ImageToStream $resolvedImage $stream } catch { throw "Writing the OS image failed: $($_.Exception.Message)" }
+        try { Test-WrittenImage $resolvedImage $stream } catch { throw "Verifying the OS image failed: $($_.Exception.Message)" }
         [UInt64] $dataStartSector = 0
         if ($dataGiB -gt 0) {
-            $dataStartSector = Add-QbtOsDataPartition $stream $imageInfo.Length ($dataGiB * 1GB)
+            $dataStartSector = Add-QbtOsDataPartition $stream $imageInfo.Length ($dataGiB * 1GB) $dataFileSystem
+            if ($dataFileSystem -eq 'ext4') {
+                Initialize-Ext4FileSystem $stream ($dataStartSector * 512) ($dataGiB * 1GB) $ext4Formatter
+            }
         }
         $stream.Dispose(); $stream = $null
-        Set-Disk -Number $disk.Number -IsOffline $false
-        Update-HostStorageCache
+        Unlock-DiskVolumes $volumeLocks; $volumeLocks = @()
+        Update-DiskLayout $disk.Number
         Start-Sleep -Seconds 2
         if ($dataGiB -gt 0) {
             $expectedOffset = $dataStartSector * 512
             $partition = Get-Partition -DiskNumber $disk.Number | Where-Object Offset -eq $expectedOffset
             if (-not $partition) { throw "Windows did not discover QBTOS_DATA partition 6 at offset $expectedOffset. Reconnect the disk before formatting it manually." }
-            $partition | Format-Volume -FileSystem NTFS -NewFileSystemLabel $script:DataLabel -Confirm:$false -Force | Out-Null
+            if ($dataFileSystem -eq 'NTFS') {
+                Format-QbtOsDataPartition $partition $dataFileSystem
+            }
         }
         Clear-Host
-        $summary = if ($dataGiB -gt 0) { "$dataGiB GiB of on-device QBTOS_DATA storage (NTFS) was created." } else { 'No on-device QBTOS_DATA storage was created.' }
+        $summary = if ($dataGiB -gt 0) { "$dataGiB GiB of on-device QBTOS_DATA storage ($dataFileSystem) was created." } else { 'No on-device QBTOS_DATA storage was created.' }
         Show-Panel 'qbtOS Imager' @("qbtOS was written successfully to PhysicalDrive$($disk.Number).", '', $summary, 'Use Safely Remove Hardware before removing the device.') 'Green'
     } finally {
         if ($stream) { $stream.Dispose() }
-        $current = Get-Disk -Number $disk.Number -ErrorAction SilentlyContinue
-        if ($current -and $current.IsOffline) {
-            try { Set-Disk -Number $disk.Number -IsOffline $false -ErrorAction Stop } catch { Write-Warning "Could not return PhysicalDrive$($disk.Number) online: $($_.Exception.Message)" }
-        }
+        Unlock-DiskVolumes $volumeLocks
+        try {
+            Update-DiskLayout $disk.Number
+        } catch { Write-Warning "Could not refresh PhysicalDrive$($disk.Number): $($_.Exception.Message)" }
     }
     } finally {
         if ($preparedImage.TemporaryPath) {

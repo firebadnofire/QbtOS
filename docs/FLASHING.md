@@ -22,11 +22,11 @@ Windows requires `zstd.exe` on `PATH` for compressed input. Each imager stages
 the decompressed image in a temporary file, validates the qbtOS partition
 layout, and removes the temporary file on exit.
 
-The Windows imager otherwise uses only built-in PowerShell, .NET, and Windows
-storage facilities. It defaults to filling the available whole GiB of
-remaining space with an NTFS `QBTOS_DATA` partition; enter `0` to leave the
-space unallocated. Windows does not include an ext4 formatter, so use the Linux
-imager when an on-card ext4 data partition is required.
+The Windows imager defaults to filling the available whole GiB of remaining
+space with an NTFS `QBTOS_DATA` partition and also offers ext4 for every image;
+enter `0` to leave the space unallocated. NTFS uses Windows' built-in formatter.
+Ext4 requires `mke2fs.exe` or `mkfs.ext4.exe` on `PATH`; the imager checks this
+before its destructive confirmation.
 
 The terminal UI requires `whiptail`, `lsblk`, `sfdisk`, and the other standard
 util-linux/coreutils tools listed by its startup checks. It also needs
