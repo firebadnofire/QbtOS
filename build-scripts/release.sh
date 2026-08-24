@@ -16,6 +16,13 @@ rauc_intermediate="${repo_root}/ca/intermediate-ca.pem"
 rauc_release_cert="${repo_root}/ca/release.crt"
 qbtos_gpg_fingerprint=7D6EF134D851C8DA0862D97494F31AF374E2EE3C
 
+repo_git() {
+	GIT_CONFIG_COUNT=1 \
+	GIT_CONFIG_KEY_0=safe.directory \
+	GIT_CONFIG_VALUE_0="$repo_root" \
+	git -C "$repo_root" "$@"
+}
+
 : "${VERSION:?VERSION is required}"
 : "${BUILD_DATE:?BUILD_DATE is required}"
 : "${REVISION:?REVISION is required}"
@@ -47,14 +54,26 @@ case "$COMMIT" in
 esac
 test "${#COMMIT}" -eq 40 || die 'COMMIT must be the full 40-character SHA'
 
-expected=$("${script_dir}/release-version.sh") || exit 1
+git_toplevel=$(repo_git rev-parse --show-toplevel) || \
+	die 'cannot validate the qbtOS Git repository'
+test "$git_toplevel" = "$repo_root" || \
+	die 'release script is not inside the qbtOS Git repository'
+printf 'release: cwd=%s repo_root=%s git_toplevel=%s\n' \
+	"$(pwd -P)" "$repo_root" "$git_toplevel"
+expected=$(
+	cd "$repo_root"
+	GIT_CONFIG_COUNT=1 \
+	GIT_CONFIG_KEY_0=safe.directory \
+	GIT_CONFIG_VALUE_0="$repo_root" \
+	"${script_dir}/release-version.sh"
+) || exit 1
 eval "$expected"
 test "$provided_version" = "$VERSION" || die 'VERSION does not match the derived version'
 test "$provided_build_date" = "$BUILD_DATE" || die 'BUILD_DATE does not match the derived date'
 test "$provided_revision" = "$REVISION" || die 'REVISION does not match reachable tags'
 test "$provided_source_tag" = "$SOURCE_TAG" || die 'SOURCE_TAG does not match reachable tags'
 test "$provided_commit" = "$COMMIT" || die 'COMMIT does not match HEAD'
-git -C "$repo_root" merge-base --is-ancestor "$SOURCE_TAG" HEAD || \
+repo_git merge-base --is-ancestor "$SOURCE_TAG" HEAD || \
 	die "$SOURCE_TAG is not reachable from HEAD"
 
 test -r "$RAUC_CERT_FILE" || die 'RAUC_CERT_FILE is missing or unreadable'

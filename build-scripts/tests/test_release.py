@@ -149,6 +149,64 @@ class ReleaseScriptTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX shell is required")
+    def test_release_preflight_uses_repo_when_called_from_elsewhere(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / "outside"
+            commands = root / "bin"
+            outside.mkdir()
+            commands.mkdir()
+            gpg = commands / "gpg"
+            gpg.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            gpg.chmod(0o755)
+
+            version_environment = os.environ.copy()
+            version_environment.update({
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "safe.directory",
+                "GIT_CONFIG_VALUE_0": str(REPO.resolve()),
+            })
+            version = subprocess.run(
+                [VERSION_SCRIPT], cwd=REPO, env=version_environment,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(version.returncode, 0, version.stderr)
+            metadata = {
+                name: value.strip("'")
+                for name, value in (
+                    line.split("=", 1) for line in version.stdout.splitlines()
+                )
+            }
+
+            release_environment = os.environ.copy()
+            for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
+                         "GIT_CONFIG_VALUE_0"):
+                release_environment.pop(name, None)
+            release_environment.update(metadata)
+            release_environment["PATH"] = (
+                f"{commands}{os.pathsep}{release_environment['PATH']}")
+            for name in ("RAUC_CERT_FILE", "RAUC_KEY_FILE",
+                         "QBTOS_GPG_KEYRING_FILE"):
+                path = root / name.lower()
+                path.write_text("invalid test input\n", encoding="utf-8")
+                release_environment[name] = str(path)
+
+            result = subprocess.run(
+                ["sh", RELEASE_SCRIPT], cwd=outside,
+                env=release_environment, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "must contain exactly one primary OpenPGP key", result.stdout)
+        self.assertNotIn("release-version:", result.stdout)
+        self.assertIn(f"cwd={outside}", result.stdout)
+        self.assertIn(f"repo_root={REPO.resolve()}", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX shell is required")
     def test_check_package_failure_keeps_diagnostic_and_exit_status(self):
         with tempfile.TemporaryDirectory() as directory:
             checker = Path(directory) / "check-package"
