@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
 CI_RUN = REPO / "build-scripts/ci-run.sh"
 CI_RELEASE = REPO / "build-scripts/ci-release.sh"
+CHECK_PACKAGE_WRAPPER = REPO / "build-scripts/check-package.sh"
 RELEASE_HANDOFF = REPO / "build-scripts/prepare-release-build.sh"
 RELEASE_HANDOFF_TEST = REPO / "build-scripts/tests/test-release-handoff.sh"
 RPI4_DEFCONFIG = REPO / "br2-external/configs/qbtos_rpi4_defconfig"
@@ -144,6 +146,39 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertLess(
             script.index("gpg --batch --show-keys --with-colons"),
             script.index('"${script_dir}/build.sh" --format flat'),
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX shell is required")
+    def test_check_package_failure_keeps_diagnostic_and_exit_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checker = Path(directory) / "check-package"
+            checker.write_text(
+                "#!/bin/sh\n"
+                "test \"$1\" = --verbose || exit 90\n"
+                "test \"$2\" = --br2-external || exit 91\n"
+                "printf '%s\\n' "
+                "'fixture.sh:3:1: warning: value appears unused [SC2034]'\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            checker.chmod(0o755)
+            environment = os.environ.copy()
+            environment["QBTOS_CHECK_PACKAGE"] = str(checker)
+
+            result = subprocess.run(
+                ["sh", CHECK_PACKAGE_WRAPPER, "fixture.sh"],
+                cwd=REPO,
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "fixture.sh:3:1: warning: value appears unused [SC2034]",
+            result.stdout,
         )
 
 

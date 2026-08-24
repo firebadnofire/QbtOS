@@ -63,7 +63,7 @@ savedefconfig:
 		BR2_DEFCONFIG="$(DEFCONFIG)" savedefconfig
 
 check:
-	"$(BUILDROOT)/utils/check-package" --br2-external \
+	sh "$(CURDIR)/build-scripts/check-package.sh" \
 		$$(find "$(EXTERNAL)" -type f -not -path '*/__pycache__/*')
 	python3 -m unittest discover -s "$(EXTERNAL)/package/qbtos-manager/tests" -v
 	python3 -m unittest discover -s "$(CURDIR)/build-scripts/tests" -v

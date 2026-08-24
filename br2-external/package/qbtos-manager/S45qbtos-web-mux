@@ -45,7 +45,7 @@ stop_mux() {
 }
 
 start() {
-	printf '%s\n' 'Starting qbtOS HTTP/HTTPS multiplexers...'
+	printf 'Starting %s HTTP/HTTPS multiplexers...\n' "$DAEMON"
 	start_mux "$MANAGER_PIDFILE" 8080 18443 18080 || return 1
 	if ! start_mux "$QBITTORRENT_PIDFILE" 8081 18444 18081; then
 		stop_mux "$MANAGER_PIDFILE" || true
