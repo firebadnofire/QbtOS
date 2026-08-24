@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import json
 import shutil
 import struct
 import subprocess
@@ -43,7 +44,7 @@ class WindowsImagerTests(unittest.TestCase):
         self.assertIn("Test-WrittenImage $resolvedImage $stream", source)
         self.assertIn("Get-FileHash -LiteralPath $ImagePath -Algorithm SHA256", source)
         self.assertNotIn("for ($i = 0; $i -lt $count; $i++)", source)
-        self.assertIn("Enter a custom .img or .img.zst path", source)
+        self.assertIn("Select a custom .img or .img.zst image", source)
         self.assertIn("Expand-ZstdImage $sourcePath $temporaryPath", source)
         self.assertIn("requires zstd.exe on PATH", source)
         self.assertIn("Remove-Item -LiteralPath $preparedImage.TemporaryPath", source)
@@ -79,6 +80,56 @@ class WindowsImagerTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(POWERSHELL, "PowerShell is required")
+    def test_download_image_choices_filter_images_and_end_with_custom_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            downloads = Path(temporary)
+            (downloads / "alpha.img").touch()
+            (downloads / "beta.IMG.ZST").touch()
+            (downloads / "not-an-image.zst").touch()
+            (downloads / "almost.img.txt").touch()
+            quoted_downloads = str(downloads).replace("'", "''")
+            command = (
+                f". '{IMAGER}' -NoRun; "
+                f"@(Get-DownloadImageChoices '{quoted_downloads}') | "
+                "Select-Object Label, Kind, Path | ConvertTo-Json -Compress"
+            )
+            result = subprocess.run(
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", command],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        choices = json.loads(result.stdout)
+        self.assertEqual(
+            [choice["Label"] for choice in choices],
+            ["alpha.img", "beta.IMG.ZST", "Select custom path"],
+        )
+        self.assertEqual(choices[-1]["Kind"], "Custom")
+        self.assertIsNone(choices[-1]["Path"])
+
+    @unittest.skipUnless(POWERSHELL, "PowerShell is required")
+    def test_download_image_choices_always_include_custom_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            quoted_downloads = temporary.replace("'", "''")
+            command = (
+                f". '{IMAGER}' -NoRun; "
+                f"@(Get-DownloadImageChoices '{quoted_downloads}') | "
+                "Select-Object Label, Kind, Path | ConvertTo-Json -Compress"
+            )
+            result = subprocess.run(
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", command],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        choice = json.loads(result.stdout)
+        self.assertEqual(choice["Label"], "Select custom path")
+        self.assertEqual(choice["Kind"], "Custom")
+        self.assertIsNone(choice["Path"])
 
     @unittest.skipUnless(POWERSHELL, "PowerShell is required")
     def test_adds_ntfs_logical_partition_without_replacing_base_layout(self):

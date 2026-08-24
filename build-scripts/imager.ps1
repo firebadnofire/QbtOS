@@ -211,14 +211,43 @@ function Resolve-Ext4Formatter {
     return $formatter.Source
 }
 
+function Get-DownloadImageChoices {
+    param(
+        [string] $DownloadsPath = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads')
+    )
+    $items = @()
+    if (Test-Path -LiteralPath $DownloadsPath -PathType Container) {
+        try {
+            $items = @(Get-ChildItem -LiteralPath $DownloadsPath -File -ErrorAction Stop |
+                Where-Object { $_.Name -match '(?i)(?:\.img\.zst|\.img)$' } |
+                Sort-Object Name |
+                ForEach-Object {
+                    [pscustomobject]@{
+                        Label = $_.Name
+                        Kind = 'Download'
+                        Path = $_.FullName
+                    }
+                })
+        } catch {
+            Write-Warning "Could not list images in Downloads ($DownloadsPath): $($_.Exception.Message)"
+        }
+    }
+    return @($items) + @(
+        [pscustomobject]@{ Label = 'Select custom path'; Kind = 'Custom'; Path = $null }
+    )
+}
+
 function Read-ImagePath {
     $items = @(
         [pscustomobject]@{ Label = "Default: $Image"; Kind = 'Default' },
-        [pscustomobject]@{ Label = 'Enter a custom .img or .img.zst path'; Kind = 'Custom' }
+        [pscustomobject]@{ Label = 'Select a custom .img or .img.zst image'; Kind = 'Custom' }
     )
     $choice = Read-Menu 'qbtOS Image' 'Choose the qbtOS image to write.' $items
     if (-not $choice) { return $null }
     if ($choice.Kind -eq 'Default') { return $Image }
+    $downloadChoice = Read-Menu 'Custom qbtOS Image' 'Choose an image from Downloads or select a custom path.' (Get-DownloadImageChoices)
+    if (-not $downloadChoice) { return $null }
+    if ($downloadChoice.Kind -eq 'Download') { return $downloadChoice.Path }
     while ($true) {
         Clear-Host
         Show-Panel 'Custom qbtOS Image' @(

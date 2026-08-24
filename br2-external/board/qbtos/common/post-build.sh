@@ -1,6 +1,58 @@
 #!/bin/sh
 set -eu
 
+load_release_metadata() {
+	if test "${QBTOS_RELEASE_BUILD:-0}" = 1; then
+		: "${QBTOS_VERSION:?missing QBTOS_VERSION}"
+		: "${QBTOS_BUILD_DATE:?missing QBTOS_BUILD_DATE}"
+		: "${QBTOS_REVISION:?missing QBTOS_REVISION}"
+		: "${QBTOS_SOURCE_TAG:?missing QBTOS_SOURCE_TAG}"
+		: "${QBTOS_COMMIT:?missing QBTOS_COMMIT}"
+	else
+		QBTOS_VERSION=development
+		QBTOS_BUILD_DATE=unknown
+		QBTOS_REVISION=0
+		QBTOS_SOURCE_TAG=unreleased
+		QBTOS_COMMIT=unknown
+	fi
+}
+
+write_os_release() {
+	os_release="${TARGET_DIR}/usr/lib/os-release"
+	install -d -m 0755 "${TARGET_DIR}/usr/lib" "${TARGET_DIR}/etc"
+	{
+		printf '%s\n' \
+			'NAME=qbtOS' \
+			'ID=qbtos' \
+			'ID_LIKE=buildroot'
+		printf 'VERSION="%s"\n' "${QBTOS_VERSION}"
+		printf 'VERSION_ID=%s\n' "${QBTOS_VERSION}"
+		printf 'PRETTY_NAME="qbtOS %s"\n' "${QBTOS_VERSION}"
+		printf 'BUILD_ID=%s\n' "${QBTOS_COMMIT}"
+		printf '%s\n' \
+			'IMAGE_ID=qbtos' \
+			"IMAGE_VERSION=${QBTOS_VERSION}" \
+			'HOME_URL="https://pubcode.archuser.org/firebadnofire/qbtOS"' \
+			'SUPPORT_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/issues"' \
+			'BUG_REPORT_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/issues"' \
+			'DOCUMENTATION_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/src/branch/main/docs"'
+		printf 'QBTOS_VERSION=%s\n' "${QBTOS_VERSION}"
+		printf 'QBTOS_BUILD_DATE=%s\n' "${QBTOS_BUILD_DATE}"
+		printf 'QBTOS_REVISION=%s\n' "${QBTOS_REVISION}"
+		printf 'QBTOS_SOURCE_TAG=%s\n' "${QBTOS_SOURCE_TAG}"
+		printf 'QBTOS_COMMIT=%s\n' "${QBTOS_COMMIT}"
+		printf '%s\n' \
+			'QBTOS_COMPATIBLE=qbtos-rpi4' \
+			'QBTOS_CHANNEL=stable'
+	} > "$os_release"
+}
+
+load_release_metadata
+if test "${2:-}" = '--os-release-only'; then
+	write_os_release
+	exit 0
+fi
+
 install -d -m 0755 "${TARGET_DIR}/boot" "${TARGET_DIR}/config" "${TARGET_DIR}/data" \
 	"${TARGET_DIR}/themes" \
 	"${TARGET_DIR}/usr/share/qbtos"
@@ -20,11 +72,6 @@ test -s "$rauc_keyring" || {
 	exit 1
 }
 if test "${QBTOS_RELEASE_BUILD:-0}" = 1; then
-	: "${QBTOS_VERSION:?missing QBTOS_VERSION}"
-	: "${QBTOS_BUILD_DATE:?missing QBTOS_BUILD_DATE}"
-	: "${QBTOS_REVISION:?missing QBTOS_REVISION}"
-	: "${QBTOS_SOURCE_TAG:?missing QBTOS_SOURCE_TAG}"
-	: "${QBTOS_COMMIT:?missing QBTOS_COMMIT}"
 	: "${QBTOS_RAUC_CERT_FILE:?missing QBTOS_RAUC_CERT_FILE}"
 	: "${QBTOS_GPG_KEYRING_FILE:?missing QBTOS_GPG_KEYRING_FILE}"
 	test -r "${QBTOS_RAUC_CERT_FILE}" || {
@@ -87,11 +134,6 @@ if test "${QBTOS_RELEASE_BUILD:-0}" = 1; then
 	install -D -m 0644 "${QBTOS_GPG_KEYRING_FILE}" \
 		"${TARGET_DIR}/etc/qbtos/update-signing.gpg"
 else
-	QBTOS_VERSION=development
-	QBTOS_BUILD_DATE=unknown
-	QBTOS_REVISION=0
-	QBTOS_SOURCE_TAG=unreleased
-	QBTOS_COMMIT=unknown
 	rm -f "${TARGET_DIR}/etc/qbtos/update-signing.gpg"
 fi
 
