@@ -21,7 +21,7 @@ $script:AlignmentBytes = 1MB
 $script:LargeDeviceBytes = 100GB
 $script:DataLabel = 'QBTOS_DATA'
 
-if (-not ('QbtOsVolumeLock' -as [type])) {
+if (-not ('QbtOsVolumeAccessV2' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -29,7 +29,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-public static class QbtOsVolumeLock
+public static class QbtOsVolumeAccessV2
 {
     private const uint GENERIC_READ = 0x80000000;
     private const uint GENERIC_WRITE = 0x40000000;
@@ -455,7 +455,7 @@ function Lock-DiskVolumes([UInt32] $DiskNumber) {
                 $lastError = $null
                 for ($attempt = 1; $attempt -le 5; $attempt++) {
                     try {
-                        $handles.Add([QbtOsVolumeLock]::Acquire($nativePath))
+                        $handles.Add([QbtOsVolumeAccessV2]::Acquire($nativePath))
                         $lastError = $null
                         break
                     } catch {
@@ -523,7 +523,7 @@ function Initialize-Ext4FileSystem {
         & $Ext4Formatter -t ext4 -F -m 0 -L $script:DataLabel $temporaryPath
         if ($LASTEXITCODE -ne 0) { throw "The ext4 formatter exited with code $LASTEXITCODE." }
         Write-Host 'Writing ext4 filesystem metadata...'
-        [QbtOsVolumeLock]::CopySparseImage($temporaryPath, $DiskStream, [Int64]$PartitionOffset)
+        [QbtOsVolumeAccessV2]::CopySparseImage($temporaryPath, $DiskStream, [Int64]$PartitionOffset)
 
         $superblock = [byte[]]::new(136)
         $DiskStream.Position = [Int64]$PartitionOffset + 1024

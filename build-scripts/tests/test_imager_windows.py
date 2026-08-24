@@ -26,6 +26,8 @@ class WindowsImagerTests(unittest.TestCase):
         self.assertIn("if ($DataFileSystem -eq 'NTFS') { 0x07 } else { 0x83 }", source)
         self.assertIn("Resolve-Ext4Formatter", source)
         self.assertIn("CopySparseImage", source)
+        self.assertIn("QbtOsVolumeAccessV2", source)
+        self.assertNotIn("'QbtOsVolumeLock' -as [type]", source)
         self.assertIn("Initialize-Ext4FileSystem $stream", source)
         self.assertNotIn("Harddisk$($Partition.DiskNumber)Partition", source)
         self.assertIn("WindowsBuiltInRole]::Administrator", source)
