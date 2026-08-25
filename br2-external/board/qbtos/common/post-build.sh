@@ -32,10 +32,10 @@ write_os_release() {
 		printf '%s\n' \
 			'IMAGE_ID=qbtos' \
 			"IMAGE_VERSION=${QBTOS_VERSION}" \
-			'HOME_URL="https://pubcode.archuser.org/firebadnofire/qbtOS"' \
-			'SUPPORT_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/issues"' \
-			'BUG_REPORT_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/issues"' \
-			'DOCUMENTATION_URL="https://pubcode.archuser.org/firebadnofire/qbtOS/src/branch/main/docs"'
+			'HOME_URL="https://github.com/firebadnofire/qbtos"' \
+			'SUPPORT_URL="https://github.com/firebadnofire/qbtos/issues"' \
+			'BUG_REPORT_URL="https://github.com/firebadnofire/qbtos/issues"' \
+			'DOCUMENTATION_URL="https://github.com/firebadnofire/qbtos/tree/main/docs"'
 		printf 'QBTOS_VERSION=%s\n' "${QBTOS_VERSION}"
 		printf 'QBTOS_BUILD_DATE=%s\n' "${QBTOS_BUILD_DATE}"
 		printf 'QBTOS_REVISION=%s\n' "${QBTOS_REVISION}"

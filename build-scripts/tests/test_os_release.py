@@ -93,7 +93,19 @@ class OsReleaseTests(unittest.TestCase):
         self.assertEqual(values["QBTOS_COMMIT"], commit)
         self.assertEqual(values["QBTOS_CHANNEL"], "stable")
         self.assertEqual(
-            values["HOME_URL"], "https://pubcode.archuser.org/firebadnofire/qbtOS"
+            values["HOME_URL"], "https://github.com/firebadnofire/qbtos"
+        )
+        self.assertEqual(
+            values["SUPPORT_URL"],
+            "https://github.com/firebadnofire/qbtos/issues",
+        )
+        self.assertEqual(
+            values["BUG_REPORT_URL"],
+            "https://github.com/firebadnofire/qbtos/issues",
+        )
+        self.assertEqual(
+            values["DOCUMENTATION_URL"],
+            "https://github.com/firebadnofire/qbtos/tree/main/docs",
         )
 
     def test_development_build_is_identified_without_release_environment(self):
