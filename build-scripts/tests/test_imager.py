@@ -192,6 +192,7 @@ class ImagerTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("CONFIG_NTFS3_FS=y", kernel)
+        self.assertIn("CONFIG_FEATURE_BLKID_TYPE=y", busybox)
         self.assertIn("CONFIG_FEATURE_VOLUMEID_NTFS=y", busybox)
         self.assertIn("mount -t ntfs3", persistence)
         self.assertIn("windows_names", persistence)

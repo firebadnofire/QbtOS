@@ -246,11 +246,16 @@ The extended-partition image and imager output have not yet been booted on
 Raspberry Pi hardware.
 
 The imager can also create partition 6 with MBR type 7 and an NTFS filesystem;
-the target includes NTFS label detection and a writable NTFS3 mount path. Those
-paths have unit and configuration coverage but have not yet been exercised on
-Raspberry Pi hardware. qBittorrent is configured to reuse the manager TLS
-certificate on port 8081; that HTTPS endpoint also awaits rebuilt-image runtime
-validation.
+the target includes NTFS label detection and a writable NTFS3 mount path. A
+revision-23 image on Raspberry Pi 4 detected the labeled partition but failed
+to mount it because BusyBox `blkid` omitted `TYPE="ntfs"`; the generic fallback
+then reported `unknown filesystem type 'ntfs'`. Mounting the same partition as
+`ntfs3` with the configured UID, GID, mask, and `windows_names` options
+succeeded read/write, including access as `qbtos-qbt`. The common BusyBox
+fragment now enables filesystem-type output so the init script selects that
+tested NTFS3 path. A rebuilt-image boot still needs to confirm automatic
+mounting. qBittorrent is configured to reuse the manager TLS certificate on
+port 8081; that HTTPS endpoint also awaits rebuilt-image runtime validation.
 
 A development image booted on a Raspberry Pi 4. The PL011 console and
 respawning login were usable through `/dev/ttyUSB0`; the SquashFS root mounted

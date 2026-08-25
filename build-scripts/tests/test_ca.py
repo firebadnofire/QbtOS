@@ -16,6 +16,7 @@ POST_BUILD = REPO / "br2-external/board/qbtos/common/post-build.sh"
 RAUC_CONFIG = (
     REPO / "br2-external/board/qbtos/rpi4/rootfs-overlay/etc/rauc/system.conf"
 )
+FSTAB = REPO / "br2-external/board/qbtos/common/rootfs-overlay/etc/fstab"
 
 
 class CertificateTrustTests(unittest.TestCase):
@@ -57,6 +58,13 @@ class CertificateTrustTests(unittest.TestCase):
         self.assertNotIn("etc/ssl", package)
         self.assertIn("path=/etc/rauc/keyring.pem", config)
         self.assertIn("check-purpose=codesign", config)
+
+    def test_rauc_mounts_bundles_below_writable_runtime(self):
+        config = RAUC_CONFIG.read_text(encoding="utf-8")
+        fstab = FSTAB.read_text(encoding="utf-8")
+
+        self.assertIn("mountprefix=/run/rauc", config)
+        self.assertRegex(fstab, r"(?m)^tmpfs\s+/run\s+tmpfs\s+")
 
     def test_bundle_carries_intermediate_without_root(self):
         release = RELEASE_SCRIPT.read_text(encoding="utf-8")

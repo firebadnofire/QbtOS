@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO = Path(__file__).parents[2]
 CONFIGS = REPO / "br2-external/configs"
+KMOD_MAKEFILE = REPO / "buildroot/package/kmod/kmod.mk"
 
 
 class DefconfigTests(unittest.TestCase):
@@ -30,6 +31,16 @@ class DefconfigTests(unittest.TestCase):
                 source = defconfig.read_text(encoding="utf-8")
                 self.assertIn(script, source)
                 self.assertIn(arguments, source)
+
+    def test_rpi4_kmod_can_load_xz_compressed_kernel_modules(self):
+        source = (CONFIGS / "qbtos_rpi4_defconfig").read_text(encoding="utf-8")
+        kmod_makefile = KMOD_MAKEFILE.read_text(encoding="utf-8")
+
+        self.assertIn("BR2_PACKAGE_KMOD_TOOLS=y\n", source)
+        self.assertIn("BR2_PACKAGE_HOST_KMOD_XZ=y\n", source)
+        self.assertIn("BR2_PACKAGE_XZ=y\n", source)
+        self.assertIn("ifeq ($(BR2_PACKAGE_XZ),y)\n", kmod_makefile)
+        self.assertIn("KMOD_CONF_OPTS += -Dxz=enabled\n", kmod_makefile)
 
 
 if __name__ == "__main__":

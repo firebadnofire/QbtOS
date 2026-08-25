@@ -96,10 +96,10 @@ class UpdateValidationTests(unittest.TestCase):
             keyring.write_bytes(b"public key")
 
             def verify(command, **kwargs):
-                del kwargs
-                output = Path(command[command.index("--output") + 1])
-                output.write_text(checksum_text, encoding="ascii")
-                return types.SimpleNamespace(returncode=0)
+                self.assertEqual(command[command.index("--output") + 1], "-")
+                self.assertIs(kwargs["stdout"], update.subprocess.PIPE)
+                return types.SimpleNamespace(
+                    returncode=0, stdout=checksum_text.encode("ascii"))
 
             entries = update.verify_release_checksums(
                 document, root=root,
@@ -107,6 +107,7 @@ class UpdateValidationTests(unittest.TestCase):
                 runner=verify, keyring=keyring)
             self.assertEqual(entries[document["bundle_filename"]],
                              document["bundle_sha256"])
+            self.assertEqual(list(root.glob(".checksums.*")), [])
 
     def test_openpgp_signature_failure_rejected(self):
         document = feed()

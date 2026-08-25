@@ -230,21 +230,19 @@ def verify_release_checksums(document, *, root=UPDATE_ROOT,
     signed_path = root / document["checksum_filename"]
     signed_pending = root / f".{document['checksum_filename']}.pending"
     atomic_write_bytes(signed_pending, signed)
-    descriptor, clear_name = tempfile.mkstemp(prefix=".checksums.", dir=root)
-    os.close(descriptor)
-    os.unlink(clear_name)
-    clear_path = Path(clear_name)
     try:
         result = runner([
-            GPGV, "--keyring", str(keyring), "--output", str(clear_path),
+            GPGV, "--keyring", str(keyring), "--output", "-",
             str(signed_pending),
-        ], timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ], timeout=30, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                         check=False)
-        if result.returncode != 0 or not clear_path.is_file():
+        clear = getattr(result, "stdout", b"")
+        if result.returncode != 0 or not isinstance(clear, bytes) or \
+                not clear or len(clear) > MAX_CHECKSUM_BYTES:
             signed_pending.unlink(missing_ok=True)
             raise UpdateError("OpenPGP release checksum signature verification failed")
         entries = {}
-        for line in clear_path.read_text(encoding="ascii").splitlines():
+        for line in clear.decode("ascii").splitlines():
             match = re.fullmatch(r"([0-9a-f]{64})  ([^/]+)", line)
             if not match or match.group(2) in entries:
                 signed_pending.unlink(missing_ok=True)
@@ -253,8 +251,6 @@ def verify_release_checksums(document, *, root=UPDATE_ROOT,
     except (OSError, UnicodeError, subprocess.SubprocessError) as error:
         signed_pending.unlink(missing_ok=True)
         raise UpdateError("unable to verify signed release checksums") from error
-    finally:
-        clear_path.unlink(missing_ok=True)
 
     expected_names = {
         document["image_filename"], document["bundle_filename"],
