@@ -68,6 +68,15 @@ installed marker, firewall table, up VPN interface, external IPv4 route through
 that interface, and a recent WireGuard handshake when applicable. A watchdog
 stops qBittorrent if those checks later fail.
 
+`sslh` passes the public TLS connection through from port 8081 to qBittorrent's
+loopback-only port 18444 without rewriting HTTP headers. qBittorrent Host-header
+validation is therefore disabled to permit that intentional port translation;
+otherwise it returns `Unauthorized` because the public Host port differs from
+its listener port. Localhost authentication remains explicitly enabled because
+the multiplexer connects from loopback. CSRF protection, clickjacking
+protection, secure cookies, TLS, the loopback bind, and the LAN-only firewall
+boundary remain enabled.
+
 WireGuard's encrypted outer UDP packets retain the originating socket UID even
 though they leave through Ethernet. VPN startup therefore reads `wg0`'s
 kernel-assigned fwmark and adds it to an initially empty nftables mark set. The

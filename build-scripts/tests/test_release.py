@@ -391,6 +391,13 @@ class ForgejoWorkflowTests(unittest.TestCase):
             workflow.index("  release:")
         ]
         self.assertIn("runs-on: [ubuntu-latest]", imager_job)
+        self.assertIn("Bootstrap Node for Forgejo actions", imager_job)
+        self.assertIn('node_version="22.23.2"', imager_job)
+        self.assertIn("SHASUMS256.txt | sha256sum --check --strict", imager_job)
+        self.assertLess(
+            imager_job.index("Bootstrap Node for Forgejo actions"),
+            imager_job.index("actions/checkout@v4"),
+        )
         self.assertIn('[[ "$ID" == ubuntu ]]', imager_job)
         self.assertIn("Install .NET 8 SDK for Windows cross-compilation", workflow)
         self.assertIn("Cross-compile Windows imager GUI on Ubuntu", workflow)

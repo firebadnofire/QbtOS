@@ -243,6 +243,11 @@ class ValidationTests(unittest.TestCase):
     def test_qbittorrent_webui_reuses_manager_tls_identity(self):
         config = manager.add_qbittorrent_https(
             "[Preferences]\nWebUI\\HTTPS\\Enabled=false\n"
+            "WebUI\\HostHeaderValidation=true\n"
+            "WebUI\\LocalHostAuth=false\n"
+            "WebUI\\CSRFProtection=false\n"
+            "WebUI\\ClickjackingProtection=false\n"
+            "WebUI\\SecureCookie=false\n"
             "WebUI\\Port=8081\n\n[Other]\nValue=true\n")
 
         self.assertIn(
@@ -252,8 +257,18 @@ class ValidationTests(unittest.TestCase):
         self.assertIn(f"WebUI\\Address={manager.LOOPBACK}", config)
         self.assertIn(
             f"WebUI\\Port={manager.QBITTORRENT_TLS_PORT}", config)
+        self.assertIn("WebUI\\HostHeaderValidation=false", config)
+        self.assertIn("WebUI\\LocalHostAuth=true", config)
+        self.assertIn("WebUI\\CSRFProtection=true", config)
+        self.assertIn("WebUI\\ClickjackingProtection=true", config)
+        self.assertIn("WebUI\\SecureCookie=true", config)
         self.assertNotIn("WebUI\\Port=8081", config)
         self.assertNotIn("WebUI\\HTTPS\\Enabled=false", config)
+        self.assertNotIn("WebUI\\HostHeaderValidation=true", config)
+        self.assertNotIn("WebUI\\LocalHostAuth=false", config)
+        self.assertNotIn("WebUI\\CSRFProtection=false", config)
+        self.assertNotIn("WebUI\\ClickjackingProtection=false", config)
+        self.assertNotIn("WebUI\\SecureCookie=false", config)
         self.assertLess(
             config.index("WebUI\\HTTPS\\Enabled=true"),
             config.index("[Other]"))

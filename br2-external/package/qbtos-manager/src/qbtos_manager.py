@@ -113,10 +113,18 @@ def qbittorrent_password_hash(password):
 def qbittorrent_https_options():
     return (
         f"WebUI\\Address={LOOPBACK}",
+        "WebUI\\CSRFProtection=true",
+        "WebUI\\ClickjackingProtection=true",
         f"WebUI\\HTTPS\\CertificatePath={TLS_CERT}",
         "WebUI\\HTTPS\\Enabled=true",
         f"WebUI\\HTTPS\\KeyPath={TLS_KEY}",
+        # sslh passes TLS through without rewriting the public :8081 Host
+        # header, while qBittorrent listens on the loopback-only :18444
+        # backend. Its Host-port validation otherwise rejects every request.
+        "WebUI\\HostHeaderValidation=false",
+        "WebUI\\LocalHostAuth=true",
         f"WebUI\\Port={QBITTORRENT_TLS_PORT}",
+        "WebUI\\SecureCookie=true",
     )
 
 
@@ -378,6 +386,7 @@ def write_qbittorrent_config(settings, qbt_password):
             if metadata.st_uid != account.pw_uid or metadata.st_gid != account.pw_gid:
                 raise
     interface = settings["vpn_interface"]
+    webui_options = "\n".join(qbittorrent_https_options())
     config = f"""[BitTorrent]
 Session\\DefaultSavePath={data_path}/downloads
 Session\\Interface={interface}
@@ -391,12 +400,8 @@ Accepted=true
 
 [Preferences]
 Connection\\UPnP=false
-WebUI\\Address={LOOPBACK}
-WebUI\\HTTPS\\CertificatePath={TLS_CERT}
-WebUI\\HTTPS\\Enabled=true
-WebUI\\HTTPS\\KeyPath={TLS_KEY}
+{webui_options}
 WebUI\\Password_PBKDF2=\"@ByteArray({qbt_password})\"
-WebUI\\Port={QBITTORRENT_TLS_PORT}
 WebUI\\ServerDomains=*
 WebUI\\UseUPnP=false
 WebUI\\Username={settings['qb_username']}

@@ -9,6 +9,41 @@ jobs:
   imager-ui:
     runs-on: [ubuntu-latest]
     steps:
+      # Forgejo's JavaScript actions require Node, but this Ubuntu runner image
+      # intentionally starts without it. Bootstrap a pinned host-architecture
+      # build before invoking checkout or any other JavaScript action.
+      - name: Bootstrap Node for Forgejo actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          [[ "$ID" == ubuntu ]]
+          [[ "$(id -u)" -eq 0 ]]
+
+          node_version="22.23.2"
+          case "$(uname -m)" in
+            x86_64) node_arch="x64" ;;
+            aarch64) node_arch="arm64" ;;
+            *) echo "Unsupported Ubuntu runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          archive="node-v${node_version}-linux-${node_arch}.tar.xz"
+          base_url="https://nodejs.org/download/release/v${node_version}"
+
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl file git xz-utils
+          rm -rf /var/lib/apt/lists/*
+          install -d -m 0755 /tmp/qbtos-node-bootstrap
+          cd /tmp/qbtos-node-bootstrap
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output SHASUMS256.txt "$base_url/SHASUMS256.txt"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$archive" "$base_url/$archive"
+          grep "  $archive\$" SHASUMS256.txt | sha256sum --check --strict
+          tar --extract --xz --file "$archive" --directory /usr/local \
+            --strip-components=1
+          [[ "$(node --version)" == "v${node_version}" ]]
+
       - name: Check out tagged source for imager
         uses: https://data.forgejo.org/actions/checkout@v4
 
