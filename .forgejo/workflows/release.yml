@@ -68,7 +68,7 @@ jobs:
           file "$publish_dir/qbtOS Imager.exe" | grep -Eq 'PE32\+?.*executable'
 
       - name: Transfer Windows imager to signed release job
-        uses: https://data.forgejo.org/actions/upload-artifact@v4
+        uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
           name: qbtos-imager-windows-x64
           path: output/imager-ui-release/qbtOS Imager.exe
@@ -279,7 +279,7 @@ jobs:
             "$workspace/build-scripts/ci-release.sh"
 
       - name: Retrieve Ubuntu-cross-compiled Windows imager
-        uses: https://data.forgejo.org/actions/download-artifact@v4
+        uses: https://code.forgejo.org/forgejo/download-artifact@v4
         with:
           name: qbtos-imager-windows-x64
           path: output/imager-ui-download

@@ -408,8 +408,17 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("PE32\\+?.*executable", workflow)
         self.assertIn('artifact="dist/$VERSION.imager-windows-x64.exe"', workflow)
         self.assertIn('sha256sum "$artifact" >> "dist/$VERSION.sha256"', workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
-        self.assertIn("actions/download-artifact@v4", workflow)
+        self.assertIn(
+            "uses: https://code.forgejo.org/forgejo/upload-artifact@v4",
+            imager_job)
+        self.assertIn("path: output/imager-ui-release/qbtOS Imager.exe", imager_job)
+        self.assertIn(
+            "uses: https://code.forgejo.org/forgejo/download-artifact@v4",
+            workflow)
+        self.assertIn("path: output/imager-ui-download", workflow)
+        self.assertIn('source="output/imager-ui-download/qbtOS Imager.exe"', workflow)
+        self.assertNotIn("actions/upload-artifact@v4", workflow)
+        self.assertNotIn("actions/download-artifact@v4", workflow)
         self.assertIn("needs: imager-ui", workflow)
         self.assertLess(
             workflow.index("Cross-compile Windows imager GUI on Ubuntu"),
