@@ -611,6 +611,16 @@ def load_latest_update():
         raise ValidationError(str(error)) from error
 
 
+def download_update(document):
+    try:
+        qbtos_update.verify_release_checksums(document)
+    except (qbtos_update.UpdateError, OSError) as error:
+        qbtos_update.set_update_status(
+            "failed", 0, f"Update verification failed: {error}")
+        raise
+    return qbtos_update.download_bundle(document)
+
+
 def update_feed_url(payload):
     settings = {}
     try:
@@ -916,8 +926,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "status": status_payload()})
         elif self.path == "/api/update/download":
             document = load_latest_update()
-            qbtos_update.verify_release_checksums(document)
-            qbtos_update.download_bundle(document)
+            download_update(document)
             self._json(200, {"ok": True, "status": status_payload()})
         elif self.path == "/api/update/install":
             document = load_latest_update()

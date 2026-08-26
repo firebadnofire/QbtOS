@@ -107,6 +107,17 @@ separate explicit actions.
 The feed and release attachments must be anonymously readable; qbtOS rejects
 URLs containing embedded credentials and does not store a Forgejo API token.
 
+Revision 23 has two bootstrap defects that prevent its manager from completing
+an update: GnuPG 2.5 verifies the clear-signed checksum but only emits its
+authenticated plaintext on standard output, while that revision expects a
+named output file; its target `kmod` also cannot decompress the shipped XZ
+device-mapper modules needed to mount a RAUC verity bundle. Revision 24 and
+later read the verified checksum from standard output and include XZ support;
+the kernel additionally keeps device-mapper verity built in so update safety no
+longer depends on module loading. A revision 23 appliance therefore requires a
+one-time trusted live recovery of both paths or a configuration backup followed
+by a full-image reflash. Do not bypass either OpenPGP or RAUC verification.
+
 For a locally transferred bundle, inspect and install it with:
 
 ```sh

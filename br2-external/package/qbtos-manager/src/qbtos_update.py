@@ -214,6 +214,9 @@ def verify_release_checksums(document, *, root=UPDATE_ROOT,
     """Verify the supplemental OpenPGP signature and bind it to the feed."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
+    for legacy_output in root.glob(".checksums.*"):
+        if legacy_output.is_file() or legacy_output.is_symlink():
+            legacy_output.unlink(missing_ok=True)
     keyring = Path(keyring)
     if not keyring.is_file():
         raise UpdateError("OpenPGP update verification key is unavailable")

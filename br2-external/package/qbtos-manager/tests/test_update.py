@@ -94,6 +94,8 @@ class UpdateValidationTests(unittest.TestCase):
             root = Path(directory)
             keyring = root / "trusted.gpg"
             keyring.write_bytes(b"public key")
+            legacy_output = root / ".checksums.rev23.part"
+            legacy_output.write_text(checksum_text, encoding="ascii")
 
             def verify(command, **kwargs):
                 self.assertEqual(command[command.index("--output") + 1], "-")

@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO = Path(__file__).parents[2]
 CONFIGS = REPO / "br2-external/configs"
+COMMON_KERNEL_FRAGMENT = REPO / "br2-external/board/qbtos/common/kernel.fragment"
 KMOD_MAKEFILE = REPO / "buildroot/package/kmod/kmod.mk"
 
 
@@ -41,6 +42,12 @@ class DefconfigTests(unittest.TestCase):
         self.assertIn("BR2_PACKAGE_XZ=y\n", source)
         self.assertIn("ifeq ($(BR2_PACKAGE_XZ),y)\n", kmod_makefile)
         self.assertIn("KMOD_CONF_OPTS += -Dxz=enabled\n", kmod_makefile)
+
+    def test_rauc_verity_device_mapper_is_built_into_all_kernels(self):
+        source = COMMON_KERNEL_FRAGMENT.read_text(encoding="utf-8")
+
+        self.assertIn("CONFIG_BLK_DEV_DM=y\n", source)
+        self.assertIn("CONFIG_DM_VERITY=y\n", source)
 
 
 if __name__ == "__main__":

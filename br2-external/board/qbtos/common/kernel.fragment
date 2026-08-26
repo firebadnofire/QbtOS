@@ -2,6 +2,11 @@ CONFIG_EXT4_FS=y
 CONFIG_NTFS3_FS=y
 CONFIG_SQUASHFS=y
 CONFIG_SQUASHFS_XZ=y
+# RAUC verity bundles must be mountable before an updated root filesystem is
+# available. Keep the device-mapper path built in instead of depending on
+# target-side compressed module loading.
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_VERITY=y
 CONFIG_OVERLAY_FS=y
 CONFIG_TMPFS=y
 CONFIG_TUN=y

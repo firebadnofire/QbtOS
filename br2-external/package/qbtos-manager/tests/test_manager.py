@@ -141,6 +141,7 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("formatTimestamp(update.last_checked_at)", page)
         self.assertIn('"checking", 0, "Checking the signed update feed"', source)
         self.assertIn('"failed", 0, f"Update check failed:', source)
+        self.assertIn('"failed", 0, f"Update verification failed:', source)
 
     def test_update_feed_api_falls_back_to_shipped_default(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -151,6 +152,22 @@ class ValidationTests(unittest.TestCase):
                     manager.update_feed_url({}), manager.UPDATE_FEED_DEFAULT)
                 with self.assertRaises(manager.ValidationError):
                     manager.update_feed_url({"update_feed_url": ""})
+
+    def test_update_verification_failure_is_persisted_and_stops_download(self):
+        error = manager.qbtos_update.UpdateError("signature rejected")
+        with mock.patch.object(
+                manager.qbtos_update, "verify_release_checksums",
+                side_effect=error), mock.patch.object(
+                    manager.qbtos_update, "download_bundle") as download, \
+                mock.patch.object(
+                    manager.qbtos_update, "set_update_status") as status:
+            with self.assertRaises(manager.qbtos_update.UpdateError):
+                manager.download_update({})
+
+        status.assert_called_once_with(
+            "failed", 0,
+            "Update verification failed: signature rejected")
+        download.assert_not_called()
 
     def test_installed_ui_can_retry_vpn_and_start_qbittorrent(self):
         page = INDEX_PATH.read_text(encoding="utf-8")
