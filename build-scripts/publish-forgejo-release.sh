@@ -25,7 +25,7 @@ authorization="Authorization: token ${FORGEJO_TOKEN}"
 temporary=$(mktemp -d)
 trap 'find "$temporary" -type f -delete; rmdir "$temporary"' EXIT HUP INT TERM
 response="${temporary}/response.json"
-managed_suffixes='img.zst img.zst.asc raucb raucb.asc manifest.json manifest.json.asc sha256 sha256.asc'
+managed_suffixes='img.zst img.zst.asc raucb raucb.asc manifest.json manifest.json.asc sha256 sha256.asc imager-windows-x64.exe imager-windows-x64.exe.asc'
 
 phase() {
 	printf 'Forgejo: %s...\n' "$1"
@@ -55,8 +55,8 @@ api_write() {
 }
 
 test -s "$release_notes" || die 'release notes are missing or empty'
-test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 8 || \
-	die 'dist must contain exactly eight files'
+test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 10 || \
+	die 'dist must contain exactly ten files'
 for suffix in $managed_suffixes; do
 	test -s "${dist_dir}/${VERSION}.${suffix}" || \
 		die "missing ${VERSION}.${suffix}"
@@ -108,7 +108,7 @@ if test -n "${asset_list:-}"; then
 	done
 fi
 
-phase 'uploading eight release assets'
+phase 'uploading ten release assets'
 for suffix in $managed_suffixes; do
 	filename="${VERSION}.${suffix}"
 	api_write "uploading Forgejo asset ${filename}" \

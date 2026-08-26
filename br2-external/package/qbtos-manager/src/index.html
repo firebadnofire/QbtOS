@@ -55,6 +55,8 @@
       <input id="qb_username" name="qb_username" autocomplete="username" required minlength="3" maxlength="32" value="admin">
       <label for="qb_password">Administrator password</label>
       <input id="qb_password" name="qb_password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+      <label for="qb_password_confirmation">Confirm administrator password</label>
+      <input id="qb_password_confirmation" name="qb_password_confirmation" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
     </section>
 
     <section>
@@ -188,10 +190,20 @@
   function payload() {
     return Object.fromEntries(new FormData(form).entries());
   }
+  function validatePasswordConfirmation() {
+    const password = document.querySelector('#qb_password');
+    const confirmation = document.querySelector('#qb_password_confirmation');
+    confirmation.setCustomValidity(
+      password.value === confirmation.value ? '' : 'Administrator passwords do not match');
+  }
+  document.querySelector('#qb_password').addEventListener('input', validatePasswordConfirmation);
+  document.querySelector('#qb_password_confirmation').addEventListener('input', validatePasswordConfirmation);
   function qbtUrl() {
     return `https://${location.hostname}:8081/`;
   }
   async function submit(path) {
+    validatePasswordConfirmation();
+    if (!form.reportValidity()) return;
     message.className = '';
     message.textContent = 'Working… qBittorrent remains stopped until all checks pass.';
     try {

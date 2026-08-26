@@ -14,6 +14,23 @@ imager instead:
 .\build-scripts\imager.ps1
 ```
 
+To use the Windows graphical interface, build it with the .NET 8 SDK and run
+the published executable (Windows will request administrator access):
+
+```powershell
+.\build-scripts\build-imager-ui.ps1
+& '.\output\imager-ui\qbtOS Imager.exe'
+```
+
+The GUI supports the same raw and compressed images, storage options, disk
+identity checks, exact `ERASE` confirmation, write verification, and cleanup as
+the terminal backend. Browse for a custom image or drag one `.img` or
+`.img.zst` file onto the image field. The build is self-contained, so the
+target Windows machine does not need a separate .NET runtime. Tagged Forgejo
+releases cross-compile it on Ubuntu and publish the `.exe` together with its
+detached armored `.asc` signature. Remove generated local files with
+`.\build-scripts\clean.ps1`.
+
 Both terminal UIs offer the default build output or a custom image path. Pass
 one directly with `--image /path/to/sdcard.img.zst` on Linux or
 `--image C:\path\to\sdcard.img.zst` on Windows. Raw `.img` and

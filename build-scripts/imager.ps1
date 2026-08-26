@@ -3,10 +3,41 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string] $Image = (Join-Path (Split-Path -Parent $PSScriptRoot) 'output\images\sdcard.img'),
+    [string] $Image,
 
     [Alias('h')]
     [switch] $Help,
+
+    [Parameter(DontShow)]
+    [Nullable[UInt32]] $DiskNumber,
+
+    [Parameter(DontShow)]
+    [Nullable[UInt64]] $DataGiB,
+
+    [Parameter(DontShow)]
+    [switch] $UseMaximumData,
+
+    [Parameter(DontShow)]
+    [ValidateSet('NTFS', 'ext4')]
+    [string] $DataFileSystem = 'NTFS',
+
+    [Parameter(DontShow)]
+    [string] $Confirmation,
+
+    [Parameter(DontShow)]
+    [UInt64] $ExpectedDiskSize,
+
+    [Parameter(DontShow)]
+    [string] $ExpectedDiskSerial,
+
+    [Parameter(DontShow)]
+    [string] $ExpectedDiskBusType,
+
+    [Parameter(DontShow)]
+    [string] $ExpectedDiskFriendlyName,
+
+    [Parameter(DontShow)]
+    [switch] $ListDisks,
 
     [Parameter(DontShow)]
     [switch] $NoRun
@@ -15,11 +46,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ImageArgumentProvided = $PSBoundParameters.ContainsKey('Image')
+if (-not $script:ImageArgumentProvided) {
+    $Image = Join-Path (Split-Path -Parent $PSScriptRoot) 'output\images\sdcard.img'
+}
 
 $script:SectorSize = 512L
 $script:AlignmentBytes = 1MB
 $script:LargeDeviceBytes = 100GB
 $script:DataLabel = 'QBTOS_DATA'
+$script:EmitMachineProgress = $false
 
 if (-not ('QbtOsVolumeAccessV2' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -462,6 +497,24 @@ function Get-CandidateDisks {
     } | Where-Object { -not $_.IsSystemDisk })
 }
 
+function Get-ImagerDiskInventory {
+    @(Get-CandidateDisks | ForEach-Object {
+        $disk = $_.Disk
+        [pscustomobject]@{
+            Number = [UInt32]$disk.Number
+            FriendlyName = [string]$disk.FriendlyName
+            SerialNumber = [string]$disk.SerialNumber
+            BusType = [string]$disk.BusType
+            Size = [UInt64]$disk.Size
+            SizeLabel = Format-ByteSize $disk.Size
+            LogicalSectorSize = [UInt32]$disk.LogicalSectorSize
+            IsBoot = [bool]$disk.IsBoot
+            IsSystem = [bool]$disk.IsSystem
+            Volumes = @(Get-DiskVolumeDescriptions $disk.Number)
+        }
+    })
+}
+
 function Get-DiskVolumeDescriptions([UInt32] $DiskNumber) {
     $items = @(Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue | ForEach-Object {
         $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
@@ -580,7 +633,9 @@ function Copy-ImageToStream {
         while (($count = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
             $Destination.Write($buffer, 0, $count)
             $written += $count
-            Write-Progress -Activity 'Writing qbtOS image' -Status "$(Format-ByteSize $written) of $(Format-ByteSize $source.Length)" -PercentComplete (($written * 100.0) / $source.Length)
+            $percent = [Math]::Min(100, [int](($written * 100.0) / $source.Length))
+            Write-Progress -Activity 'Writing qbtOS image' -Status "$(Format-ByteSize $written) of $(Format-ByteSize $source.Length)" -PercentComplete $percent
+            if ($script:EmitMachineProgress) { Write-Output "QBTOS_PROGRESS|write|$percent" }
         }
         $Destination.Flush()
         Write-Progress -Activity 'Writing qbtOS image' -Completed
@@ -621,7 +676,9 @@ function Test-WrittenImage {
             if ($count -ne $wanted) { throw "Could not read the complete written image at byte $checked." }
             [void]$sha.TransformBlock($buffer, 0, $count, $null, 0)
             $checked += $count
-            Write-Progress -Activity 'Verifying written OS image' -PercentComplete (($checked * 100.0) / $imageLength)
+            $percent = [Math]::Min(100, [int](($checked * 100.0) / $imageLength))
+            Write-Progress -Activity 'Verifying written OS image' -PercentComplete $percent
+            if ($script:EmitMachineProgress) { Write-Output "QBTOS_PROGRESS|verify|$percent" }
         }
         [void]$sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
         $actual = ([BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
@@ -633,10 +690,35 @@ function Test-WrittenImage {
 }
 
 function Invoke-QbtOsImager {
+    param(
+        [Nullable[UInt32]] $RequestedDiskNumber,
+        [Nullable[UInt64]] $RequestedDataGiB,
+        [switch] $RequestedMaximumData,
+        [string] $RequestedDataFileSystem,
+        [string] $RequestedConfirmation,
+        [UInt64] $RequestedDiskSize,
+        [string] $RequestedDiskSerial,
+        [string] $RequestedDiskBusType,
+        [string] $RequestedDiskFriendlyName
+    )
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'The qbtOS imager must be run from an elevated PowerShell terminal (Run as administrator).'
     }
+    $automated = $null -ne $RequestedDiskNumber
+    if (-not $automated -and ($null -ne $RequestedDataGiB -or $RequestedMaximumData -or $RequestedConfirmation)) {
+        throw 'DiskNumber is required when supplying noninteractive imaging options.'
+    }
+    if ($automated -and -not $script:ImageArgumentProvided) {
+        throw 'Image is required for noninteractive imaging.'
+    }
+    if ($automated -and $RequestedMaximumData -and $null -ne $RequestedDataGiB) {
+        throw 'UseMaximumData and DataGiB cannot be supplied together.'
+    }
+    if ($automated -and -not $RequestedMaximumData -and $null -eq $RequestedDataGiB) {
+        throw 'DataGiB or UseMaximumData is required for noninteractive imaging.'
+    }
+    $script:EmitMachineProgress = $automated
     $requestedImage = if ($script:ImageArgumentProvided) { $Image } else { Read-ImagePath }
     if (-not $requestedImage) { Write-Host 'Imaging cancelled.'; return }
     $preparedImage = Resolve-ImagerImage $requestedImage
@@ -646,24 +728,44 @@ function Invoke-QbtOsImager {
     if (($imageInfo.Length % 512) -ne 0) { throw 'Image length is not aligned to a 512-byte sector.' }
     [void](Test-QbtOsImageLayout $resolvedImage)
 
-    $choice = Read-Menu 'qbtOS Imager' 'Select the whole disk to overwrite.' (Get-CandidateDisks)
-    if (-not $choice) { Write-Host 'Imaging cancelled.'; return }
-    $disk = Get-Disk -Number $choice.Disk.Number
+    if ($automated) {
+        $disk = Get-Disk -Number $RequestedDiskNumber -ErrorAction Stop
+        if ($RequestedDiskSize -eq 0) { throw 'ExpectedDiskSize is required for noninteractive imaging.' }
+        if ([UInt64]$disk.Size -ne $RequestedDiskSize) { throw "PhysicalDrive$RequestedDiskNumber size changed before imaging." }
+        if ($RequestedDiskBusType -and ([string]$disk.BusType -cne $RequestedDiskBusType)) { throw "PhysicalDrive$RequestedDiskNumber bus type changed before imaging." }
+        if ($RequestedDiskFriendlyName -and ([string]$disk.FriendlyName -cne $RequestedDiskFriendlyName)) { throw "PhysicalDrive$RequestedDiskNumber device name changed before imaging." }
+        if ($RequestedDiskSerial -and ([string]$disk.SerialNumber).Trim() -cne $RequestedDiskSerial.Trim()) { throw "PhysicalDrive$RequestedDiskNumber serial number changed before imaging." }
+        Write-Output "Selected PhysicalDrive$($disk.Number): $($disk.FriendlyName), $(Format-ByteSize $disk.Size), bus $($disk.BusType), serial $($disk.SerialNumber)."
+    } else {
+        $choice = Read-Menu 'qbtOS Imager' 'Select the whole disk to overwrite.' (Get-CandidateDisks)
+        if (-not $choice) { Write-Host 'Imaging cancelled.'; return }
+        $disk = Get-Disk -Number $choice.Disk.Number
+    }
     if ($disk.IsBoot -or $disk.IsSystem) { throw 'The running Windows system disk cannot be selected.' }
     if ($disk.LogicalSectorSize -ne 512) { throw "Selected disk uses $($disk.LogicalSectorSize)-byte logical sectors; qbtOS requires 512." }
     if ($disk.Size -lt $imageInfo.Length) { throw 'Selected disk is smaller than the image.' }
     $available = [Int64]$disk.Size - $imageInfo.Length - $script:AlignmentBytes
     $maximumGiB = if ($available -gt 0) { [UInt64][Math]::Floor($available / 1GB) } else { 0 }
-    $dataGiB = Read-DataSize $maximumGiB
-    $dataFileSystem = 'none'
+    $selectedDataGiB = if ($automated) {
+        if ($RequestedMaximumData) { $maximumGiB } else { [UInt64]$RequestedDataGiB }
+    } else {
+        Read-DataSize $maximumGiB
+    }
+    if ($selectedDataGiB -gt $maximumGiB) { throw "Requested QBTOS_DATA size is $selectedDataGiB GiB; maximum is $maximumGiB GiB." }
+    $selectedDataFileSystem = 'none'
     $ext4Formatter = $null
-    if ($dataGiB -gt 0) {
-        $dataFileSystem = Read-DataFileSystem
-        if (-not $dataFileSystem) { Write-Host 'Imaging cancelled.'; return }
-        if ($dataFileSystem -eq 'ext4') { $ext4Formatter = Resolve-Ext4Formatter }
+    if ($selectedDataGiB -gt 0) {
+        $selectedDataFileSystem = if ($automated) { $RequestedDataFileSystem } else { Read-DataFileSystem }
+        if (-not $selectedDataFileSystem) { Write-Host 'Imaging cancelled.'; return }
+        if ($selectedDataFileSystem -eq 'ext4') { $ext4Formatter = Resolve-Ext4Formatter }
     }
     $volumes = Get-DiskVolumeDescriptions $disk.Number
-    if (-not (Confirm-DestructiveWrite $disk $preparedImage.SourcePath $dataGiB $dataFileSystem $volumes)) { Write-Host 'Imaging cancelled.'; return }
+    $confirmed = if ($automated) { $RequestedConfirmation -ceq 'ERASE' } else { Confirm-DestructiveWrite $disk $preparedImage.SourcePath $selectedDataGiB $selectedDataFileSystem $volumes }
+    if (-not $confirmed) {
+        if ($automated) { throw 'Exact ERASE confirmation was not supplied; no disk was written.' }
+        Write-Host 'Imaging cancelled.'
+        return
+    }
 
     $physicalPath = "\\.\PhysicalDrive$($disk.Number)"
     $stream = $null
@@ -674,27 +776,31 @@ function Invoke-QbtOsImager {
         try { Copy-ImageToStream $resolvedImage $stream } catch { throw "Writing the OS image failed: $($_.Exception.Message)" }
         try { Test-WrittenImage $resolvedImage $stream } catch { throw "Verifying the OS image failed: $($_.Exception.Message)" }
         [UInt64] $dataStartSector = 0
-        if ($dataGiB -gt 0) {
-            $dataStartSector = Add-QbtOsDataPartition $stream $imageInfo.Length ($dataGiB * 1GB) $dataFileSystem
-            if ($dataFileSystem -eq 'ext4') {
-                Initialize-Ext4FileSystem $stream ($dataStartSector * 512) ($dataGiB * 1GB) $ext4Formatter
+        if ($selectedDataGiB -gt 0) {
+            $dataStartSector = Add-QbtOsDataPartition $stream $imageInfo.Length ($selectedDataGiB * 1GB) $selectedDataFileSystem
+            if ($selectedDataFileSystem -eq 'ext4') {
+                Initialize-Ext4FileSystem $stream ($dataStartSector * 512) ($selectedDataGiB * 1GB) $ext4Formatter
             }
         }
         $stream.Dispose(); $stream = $null
         Unlock-DiskVolumes $volumeLocks; $volumeLocks = @()
         Update-DiskLayout $disk.Number
         Start-Sleep -Seconds 2
-        if ($dataGiB -gt 0) {
+        if ($selectedDataGiB -gt 0) {
             $expectedOffset = $dataStartSector * 512
             $partition = Get-Partition -DiskNumber $disk.Number | Where-Object Offset -eq $expectedOffset
             if (-not $partition) { throw "Windows did not discover QBTOS_DATA partition 6 at offset $expectedOffset. Reconnect the disk before formatting it manually." }
-            if ($dataFileSystem -eq 'NTFS') {
-                Format-QbtOsDataPartition $partition $dataFileSystem
+            if ($selectedDataFileSystem -eq 'NTFS') {
+                Format-QbtOsDataPartition $partition $selectedDataFileSystem
             }
         }
-        Clear-Host
-        $summary = if ($dataGiB -gt 0) { "$dataGiB GiB of on-device QBTOS_DATA storage ($dataFileSystem) was created." } else { 'No on-device QBTOS_DATA storage was created.' }
-        Show-Panel 'qbtOS Imager' @("qbtOS was written successfully to PhysicalDrive$($disk.Number).", '', $summary, 'Use Safely Remove Hardware before removing the device.') 'Green'
+        $summary = if ($selectedDataGiB -gt 0) { "$selectedDataGiB GiB of on-device QBTOS_DATA storage ($selectedDataFileSystem) was created." } else { 'No on-device QBTOS_DATA storage was created.' }
+        if ($automated) {
+            Write-Output "QBTOS_SUCCESS|PhysicalDrive$($disk.Number)|$summary"
+        } else {
+            Clear-Host
+            Show-Panel 'qbtOS Imager' @("qbtOS was written successfully to PhysicalDrive$($disk.Number).", '', $summary, 'Use Safely Remove Hardware before removing the device.') 'Green'
+        }
     } finally {
         if ($stream) { $stream.Dispose() }
         Unlock-DiskVolumes $volumeLocks
@@ -714,8 +820,24 @@ if ($Help -and $MyInvocation.InvocationName -ne '.') {
     exit 0
 }
 
+if ($ListDisks -and $MyInvocation.InvocationName -ne '.') {
+    try {
+        ConvertTo-Json -InputObject @(Get-ImagerDiskInventory) -Depth 4 -Compress
+        exit 0
+    } catch {
+        Write-Error "Could not list imaging targets: $($_.Exception.Message)"
+        exit 1
+    }
+}
+
 if (-not $NoRun -and $MyInvocation.InvocationName -ne '.') {
-    try { Invoke-QbtOsImager } catch {
+    try {
+        Invoke-QbtOsImager -RequestedDiskNumber $DiskNumber -RequestedDataGiB $DataGiB `
+            -RequestedMaximumData:$UseMaximumData -RequestedDataFileSystem $DataFileSystem `
+            -RequestedConfirmation $Confirmation -RequestedDiskSize $ExpectedDiskSize `
+            -RequestedDiskSerial $ExpectedDiskSerial -RequestedDiskBusType $ExpectedDiskBusType `
+            -RequestedDiskFriendlyName $ExpectedDiskFriendlyName
+    } catch {
         Write-Error "qbtOS Imager failed: $($_.Exception.Message)"
         exit 1
     }

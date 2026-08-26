@@ -26,7 +26,7 @@ api_version='X-GitHub-Api-Version: 2022-11-28'
 temporary=$(mktemp -d)
 trap 'find "$temporary" -type f -delete; rmdir "$temporary"' EXIT HUP INT TERM
 response="${temporary}/response.json"
-managed_suffixes='img.zst img.zst.asc raucb raucb.asc manifest.json manifest.json.asc sha256 sha256.asc'
+managed_suffixes='img.zst img.zst.asc raucb raucb.asc manifest.json manifest.json.asc sha256 sha256.asc imager-windows-x64.exe imager-windows-x64.exe.asc'
 
 phase() {
 	printf 'GitHub mirror: %s...\n' "$1"
@@ -56,8 +56,8 @@ github_write() {
 }
 
 test -s "$release_notes" || die 'release notes are missing or empty'
-test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 8 || \
-	die 'dist must contain exactly eight files'
+test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 10 || \
+	die 'dist must contain exactly ten files'
 for suffix in $managed_suffixes; do
 	test -s "${dist_dir}/${VERSION}.${suffix}" || \
 		die "missing ${VERSION}.${suffix}"
@@ -94,7 +94,7 @@ github_write 'updating GitHub release metadata' \
 	-X PATCH -H 'Content-Type: application/json' \
 	--data-binary "@${temporary}/release.json" "${api}/releases/${release_id}"
 
-phase 'reconciling eight release assets'
+phase 'reconciling ten release assets'
 github_write 'listing GitHub release assets' \
 	"${api}/releases/${release_id}/assets?per_page=100"
 asset_list="${temporary}/github-assets.json"
@@ -112,4 +112,4 @@ for suffix in $managed_suffixes; do
 		"https://uploads.github.com/repos/${repository}/releases/${release_id}/assets?name=${filename}"
 done
 
-printf 'Mirrored GitHub release %s with eight assets\n' "$SOURCE_TAG"
+printf 'Mirrored GitHub release %s with ten assets\n' "$SOURCE_TAG"

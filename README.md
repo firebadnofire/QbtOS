@@ -68,7 +68,21 @@ offers NTFS or ext4 for the optional end partition and defaults to NTFS:
 .\build-scripts\imager.ps1
 ```
 
-Both imagers offer default-image and custom-path choices in the terminal UI,
+Windows also has a graphical interface. Build and launch it with:
+
+```powershell
+.\build-scripts\build-imager-ui.ps1
+& '.\output\imager-ui\qbtOS Imager.exe'
+```
+
+The GUI accepts `.img` and `.img.zst` files through its file picker or by
+dragging one onto the image field. The build requires the .NET 8 SDK and emits
+a self-contained Windows executable. Revision releases cross-compile that
+executable on the Ubuntu Forgejo runner and publish it with a verified detached
+armored `.asc` signature. Run `.\build-scripts\clean.ps1` to remove only the
+GUI build outputs.
+
+Both terminal imagers offer default-image and custom-path choices,
 accept raw `.img` and Zstandard-compressed `.img.zst` images, and support an
 explicit path such as `--image C:\path\to\qbtos.img.zst`. The Windows imager
 requires `zstd.exe` on `PATH` for compressed images and `mke2fs.exe` or

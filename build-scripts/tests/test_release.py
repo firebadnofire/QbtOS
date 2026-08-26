@@ -281,7 +281,8 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("forgejo-assets.json", publish)
         self.assertIn("img.zst.asc", publish)
         self.assertIn("sha256.asc", publish)
-        self.assertIn("dist must contain exactly eight files", publish)
+        self.assertIn("imager-windows-x64.exe.asc", publish)
+        self.assertIn("dist must contain exactly ten files", publish)
         self.assertIn("-X PATCH", publish)
         self.assertIn('--rawfile body "$release_notes"', publish)
         self.assertLess(
@@ -303,7 +304,8 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("github-assets.json", publish)
         self.assertIn("img.zst.asc", publish)
         self.assertIn("sha256.asc", publish)
-        self.assertIn("dist must contain exactly eight files", publish)
+        self.assertIn("imager-windows-x64.exe.asc", publish)
+        self.assertIn("dist must contain exactly ten files", publish)
         self.assertIn("-X PATCH", publish)
         self.assertIn('--rawfile body "$release_notes"', publish)
         self.assertLess(
@@ -364,13 +366,13 @@ class ForgejoWorkflowTests(unittest.TestCase):
 
         self.assertIn("Sign and verify release artifacts", workflow)
         self.assertIn(
-            "for suffix in img.zst raucb manifest.json sha256; do", workflow
+            "for suffix in img.zst raucb manifest.json sha256 imager-windows-x64.exe; do", workflow
         )
         self.assertIn("--armor --detach-sign --output \"$artifact.asc\"", workflow)
         self.assertIn('--verify "$artifact.asc" "$artifact"', workflow)
         self.assertIn('CI_KEY_PASSPHRASE: ${{ secrets.CI_KEY_PASSPHRASE }}', workflow)
         self.assertIn(
-            '[[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 8 ]]', workflow
+            '[[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 10 ]]', workflow
         )
         self.assertLess(
             workflow.index("Sign and verify release checksums"),
@@ -379,6 +381,31 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertLess(
             workflow.index("Sign and verify release artifacts"),
             workflow.index("Publish Forgejo release and moving feed"),
+        )
+
+    def test_windows_imager_is_cross_compiled_on_ubuntu_and_checksummed(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        imager_job = workflow[
+            workflow.index("  imager-ui:"):
+            workflow.index("  release:")
+        ]
+        self.assertIn("runs-on: [ubuntu-latest]", imager_job)
+        self.assertIn('[[ "$ID" == ubuntu ]]', imager_job)
+        self.assertIn("Install .NET 8 SDK for Windows cross-compilation", workflow)
+        self.assertIn("Cross-compile Windows imager GUI on Ubuntu", workflow)
+        self.assertIn("--runtime win-x64 --self-contained true", workflow)
+        self.assertIn("-p:EnableWindowsTargeting=true", workflow)
+        self.assertIn("-p:PublishSingleFile=true", workflow)
+        self.assertIn("PE32\\+?.*executable", workflow)
+        self.assertIn('artifact="dist/$VERSION.imager-windows-x64.exe"', workflow)
+        self.assertIn('sha256sum "$artifact" >> "dist/$VERSION.sha256"', workflow)
+        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/download-artifact@v4", workflow)
+        self.assertIn("needs: imager-ui", workflow)
+        self.assertLess(
+            workflow.index("Cross-compile Windows imager GUI on Ubuntu"),
+            workflow.index("Sign and verify release checksums"),
         )
 
     def test_release_notes_publish_exact_verification_contract(self):
@@ -514,7 +541,11 @@ class ForgejoWorkflowTests(unittest.TestCase):
             self.assertIn(
                 f"key: ${{{{ steps.{restore_id}.outputs.cache-primary-key }}}}",
                 save_step)
-        self.assertNotIn("upload-artifact", workflow)
+        imager_transfer = workflow[
+            workflow.index("Transfer Windows imager to signed release job"):
+            workflow.index("  release:")
+        ]
+        self.assertNotIn(".ci-cache", imager_transfer)
 
         self.assertIn('BR2_DL_DIR="$workspace/.ci-cache/buildroot-dl"', workflow)
         self.assertIn(

@@ -6,7 +6,41 @@ on:
       - "revision-*"
 
 jobs:
+  imager-ui:
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: Check out tagged source for imager
+        uses: https://data.forgejo.org/actions/checkout@v4
+
+      - name: Install .NET 8 SDK for Windows cross-compilation
+        uses: https://data.forgejo.org/actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Cross-compile Windows imager GUI on Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          [[ "$ID" == ubuntu ]]
+          publish_dir="output/imager-ui-release"
+          dotnet publish build-scripts/imager-ui/QbtOs.Imager.Ui.csproj \
+            --configuration Release --runtime win-x64 --self-contained true \
+            --output "$publish_dir" -p:EnableWindowsTargeting=true \
+            -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false
+          [[ -s "$publish_dir/qbtOS Imager.exe" ]]
+          [[ "$(find "$publish_dir" -maxdepth 1 -type f | wc -l)" -eq 1 ]]
+          file "$publish_dir/qbtOS Imager.exe" | grep -Eq 'PE32\+?.*executable'
+
+      - name: Transfer Windows imager to signed release job
+        uses: https://data.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: qbtos-imager-windows-x64
+          path: output/imager-ui-release/qbtOS Imager.exe
+          if-no-files-found: error
+
   release:
+    needs: imager-ui
     runs-on: [ubuntu-latest]
     # Forgejo's JavaScript actions (checkout/cache) require Node.
     # The ubuntu-latest runner currently launches an ubuntu:24.04 container,
@@ -209,6 +243,24 @@ jobs:
           bash ./build-scripts/prepare-release-build.sh "$build_user" -- \
             "$workspace/build-scripts/ci-release.sh"
 
+      - name: Retrieve Ubuntu-cross-compiled Windows imager
+        uses: https://data.forgejo.org/actions/download-artifact@v4
+        with:
+          name: qbtos-imager-windows-x64
+          path: output/imager-ui-download
+
+      - name: Add Windows imager to signed release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="dist/$VERSION.imager-windows-x64.exe"
+          source="output/imager-ui-download/qbtOS Imager.exe"
+          [[ -s "$source" ]]
+          file "$source" | grep -Eq 'PE32\+?.*executable'
+          install -m 0644 "$source" "$artifact"
+          sha256sum "$artifact" >> "dist/$VERSION.sha256"
+          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 5 ]]
+
       # Save after a completed build attempt, including a failed build, so
       # reusable downloads and compiler work are preserved. An exact hit is
       # already immutable; a prefix restore is saved under the new primary key.
@@ -249,7 +301,7 @@ jobs:
             GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch --decrypt \
               "$VERSION.sha256" | sha256sum -c -
           )
-          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4 ]]
+          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 5 ]]
 
       - name: Sign and verify release artifacts
         shell: bash
@@ -258,7 +310,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$CI_KEY_PASSPHRASE" ]]
-          for suffix in img.zst raucb manifest.json sha256; do
+          for suffix in img.zst raucb manifest.json sha256 imager-windows-x64.exe; do
             artifact="dist/$VERSION.$suffix"
             [[ -s "$artifact" ]]
             printf '%s\n' "$CI_KEY_PASSPHRASE" | \
@@ -269,7 +321,7 @@ jobs:
             GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch \
               --verify "$artifact.asc" "$artifact"
           done
-          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 8 ]]
+          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 10 ]]
 
       - name: Create moving feed document
         shell: bash

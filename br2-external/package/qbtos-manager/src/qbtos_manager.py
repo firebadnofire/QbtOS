@@ -140,12 +140,14 @@ def add_qbittorrent_https(config):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def validate_account(username, password):
+def validate_account(username, password, password_confirmation):
     if not USERNAME_RE.fullmatch(username or ""):
         raise ValidationError(
             "Username must be 3-32 letters, numbers, dots, dashes, or underscores")
     if len(password or "") < 10 or len(password) > 128:
         raise ValidationError("Password must contain 10-128 characters")
+    if password != password_confirmation:
+        raise ValidationError("Administrator passwords do not match")
 
 
 def validate_data_path(value, roots=SAFE_DATA_ROOTS):
@@ -306,7 +308,8 @@ def validate_openvpn(text, username="", password=""):
 def persist_setup(payload):
     username = payload.get("qb_username", "")
     password = payload.get("qb_password", "")
-    validate_account(username, password)
+    password_confirmation = payload.get("qb_password_confirmation", "")
+    validate_account(username, password, password_confirmation)
     data_path = validate_data_path(payload.get("data_path", ""))
     vpn_type = payload.get("vpn_type")
     vpn_text = payload.get("vpn_config", "")

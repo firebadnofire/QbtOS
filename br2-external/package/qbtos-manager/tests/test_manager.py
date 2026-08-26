@@ -104,6 +104,25 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("window.location.replace(qbtUrl())", page)
         self.assertIn("https://${location.hostname}:8081/", page)
 
+    def test_setup_requires_matching_administrator_passwords(self):
+        page = INDEX_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('id="qb_password_confirmation"', page)
+        self.assertIn('name="qb_password_confirmation"', page)
+        self.assertIn('autocomplete="new-password" required', page)
+        self.assertIn("validatePasswordConfirmation()", page)
+        self.assertIn("if (!form.reportValidity()) return", page)
+
+        with self.assertRaisesRegex(
+                manager.ValidationError, "Administrator passwords do not match"):
+            manager.persist_setup({
+                "qb_username": "admin",
+                "qb_password": "secure password",
+                "qb_password_confirmation": "mistyped password",
+            })
+
+        manager.validate_account("admin", "secure password", "secure password")
+
     def test_installed_ui_hides_setup_and_exposes_theme_actions(self):
         page = INDEX_PATH.read_text(encoding="utf-8")
 
