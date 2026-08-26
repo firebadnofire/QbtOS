@@ -14,6 +14,7 @@ RELEASE_SCRIPT = REPO / "build-scripts/release.sh"
 FORGEJO_WORKFLOW = REPO / ".forgejo/workflows/release.yml"
 FORGEJO_PUBLISH = REPO / "build-scripts/publish-forgejo-release.sh"
 GITHUB_PUBLISH = REPO / "build-scripts/publish-github-release.sh"
+RELEASE_NOTES = REPO / "build-scripts/release-notes.md"
 CI_RUN = REPO / "build-scripts/ci-run.sh"
 CI_RELEASE = REPO / "build-scripts/ci-release.sh"
 CHECK_PACKAGE_WRAPPER = REPO / "build-scripts/check-package.sh"
@@ -278,6 +279,15 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('select(.name == $name)', publish)
         self.assertIn('cp "$response" "$asset_list"', publish)
         self.assertIn("forgejo-assets.json", publish)
+        self.assertIn("img.zst.asc", publish)
+        self.assertIn("sha256.asc", publish)
+        self.assertIn("dist must contain exactly eight files", publish)
+        self.assertIn("-X PATCH", publish)
+        self.assertIn('--rawfile body "$release_notes"', publish)
+        self.assertLess(
+            publish.index("updating Forgejo release metadata"),
+            publish.index("removing existing Forgejo asset"),
+        )
         self.assertNotIn("jq -r '.[].id'", publish)
 
     def test_release_is_mirrored_to_github_with_existing_secret(self):
@@ -291,6 +301,15 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("api.github.com/repos/${repository}", publish)
         self.assertIn("uploads.github.com/repos/${repository}", publish)
         self.assertIn("github-assets.json", publish)
+        self.assertIn("img.zst.asc", publish)
+        self.assertIn("sha256.asc", publish)
+        self.assertIn("dist must contain exactly eight files", publish)
+        self.assertIn("-X PATCH", publish)
+        self.assertIn('--rawfile body "$release_notes"', publish)
+        self.assertLess(
+            publish.index("updating GitHub release metadata"),
+            publish.index("removing existing GitHub asset"),
+        )
         self.assertIn("--fail-with-body", publish)
         self.assertNotIn("set -x", publish)
 
@@ -339,6 +358,46 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn('gpg --batch --decrypt \\\n', workflow)
         self.assertIn('"$VERSION.sha256" | sha256sum -c -', workflow)
         self.assertIn('find dist -maxdepth 1 -type f | wc -l', workflow)
+
+    def test_every_release_artifact_gets_a_verified_detached_signature(self):
+        workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("Sign and verify release artifacts", workflow)
+        self.assertIn(
+            "for suffix in img.zst raucb manifest.json sha256; do", workflow
+        )
+        self.assertIn("--armor --detach-sign --output \"$artifact.asc\"", workflow)
+        self.assertIn('--verify "$artifact.asc" "$artifact"', workflow)
+        self.assertIn('CI_KEY_PASSPHRASE: ${{ secrets.CI_KEY_PASSPHRASE }}', workflow)
+        self.assertIn(
+            '[[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 8 ]]', workflow
+        )
+        self.assertLess(
+            workflow.index("Sign and verify release checksums"),
+            workflow.index("Sign and verify release artifacts"),
+        )
+        self.assertLess(
+            workflow.index("Sign and verify release artifacts"),
+            workflow.index("Publish Forgejo release and moving feed"),
+        )
+
+    def test_release_notes_publish_exact_verification_contract(self):
+        notes = RELEASE_NOTES.read_text(encoding="utf-8")
+        updates = (REPO / "docs/UPDATES.md").read_text(encoding="utf-8")
+
+        required = (
+            "Every artifact includes a detached armored GPG signature",
+            "hkps://keys.openpgp.org",
+            "hkps://keyserver.ubuntu.com",
+            "curl --proto '=https' --tlsv1.2 -fsSLo william.asc "
+            "https://archuser.org/gpg/william.asc",
+            "gpg --fingerprint 7D6EF134D851C8DA0862D97494F31AF374E2EE3C",
+            "gpg --verify <artifact>.asc <artifact>",
+            "7D6E F134 D851 C8DA 0862 D974 94F3 1AF3 74E2 EE3C",
+        )
+        for text in required:
+            self.assertIn(text, notes)
+            self.assertIn(text, updates)
 
     def test_buildroot_release_runs_as_unprivileged_node_user(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")

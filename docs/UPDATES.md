@@ -53,7 +53,8 @@ The additional OpenPGP layer uses a public keyring supplied as
 `QBTOS_GPG_KEYRING_FILE`. Release builds accept exactly one primary key with
 fingerprint `7D6E F134 D851 C8DA 0862 D974 94F3 1AF3 74E2 EE3C`; CI
 derives it from `CI_KEY`, clear-signs the required `.sha256` artifact using
-`CI_KEY_PASSPHRASE`, and verifies the signature and hashes before upload.
+`CI_KEY_PASSPHRASE`, creates a detached armored signature for each release
+artifact, and verifies every signature and hash before upload.
 Neither private key enters the image. This dedicated CA is not installed in
 the system TLS store; normal HTTPS continues to use only Buildroot's Mozilla
 CA bundle. RAUC verifies the leaf with `check-purpose=codesign`.
@@ -69,7 +70,28 @@ make release VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" \
 The command creates exactly `dist/$VERSION.img.zst`, `.raucb`,
 `.manifest.json`, and `.sha256`. A direct local build leaves `.sha256` as plain
 text; Forgejo replaces it with an ASCII clear-signed document while retaining
-the required filename.
+the required filename. CI then adds the matching `.asc` file for each of the
+four artifacts.
+
+Every artifact includes a detached armored GPG signature with the
+same filename plus `.asc`. Download both files, recover the signing key using
+any one of these methods, and verify the artifact:
+
+```sh
+gpg --keyserver hkps://keys.openpgp.org --recv-keys 7D6EF134D851C8DA0862D97494F31AF374E2EE3C
+# Or:
+gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 7D6EF134D851C8DA0862D97494F31AF374E2EE3C
+# Or:
+curl --proto '=https' --tlsv1.2 -fsSLo william.asc https://archuser.org/gpg/william.asc
+gpg --import william.asc
+
+gpg --fingerprint 7D6EF134D851C8DA0862D97494F31AF374E2EE3C
+gpg --verify <artifact>.asc <artifact>
+```
+
+Confirm the recovered key fingerprint is exactly
+`7D6E F134 D851 C8DA 0862 D974 94F3 1AF3 74E2 EE3C` before trusting a
+successful signature verification.
 
 For development only, create an isolated, short-lived code-signing certificate
 and use `make development-release`:
@@ -141,7 +163,8 @@ torrent payload data is never migrated.
 
 Forgejo requires `RAUC_CERT_PEM`, `RAUC_KEY_PEM`, `CI_KEY`, and
 `CI_KEY_PASSPHRASE`. The workflow's short-lived automatic `FORGEJO_TOKEN`
-publishes exactly four release attachments and updates the `update-feed` branch.
+publishes four primary artifacts and four detached signatures, then updates the
+`update-feed` branch.
 `CI_KEY` may contain an ASCII-armored OpenPGP private key, but the shared
 Forgejo account secret normally contains its base64 encoding; the workflow
 decodes that form before importing it. `CI_TRUSTED_PUBLIC_KEYS` remains raw,
@@ -150,9 +173,10 @@ The stable feed URL is
 `https://FORGEJO/OWNER/REPOSITORY/raw/branch/update-feed/latest.json`.
 
 Release publication is idempotent after a partial CI failure. The publisher
-reuses an existing tag release, reconciles the four managed assets, creates the
-`update-feed` branch from `main` when necessary, and creates or updates
-`latest.json` as appropriate. The same four signed artifacts are mirrored to
+reuses an existing tag release, reconciles all eight managed assets and the
+verification instructions, creates the `update-feed` branch from `main` when
+necessary, and creates or updates `latest.json` as appropriate. The same four
+artifacts and their four detached signatures are mirrored to
 `https://github.com/firebadnofire/qbtos` using the dedicated `GH_KEY` secret;
 the canonical moving update feed remains on Forgejo.
 `CI_TRUSTED_PUBLIC_KEYS` is an optional public-key bundle used during OpenPGP

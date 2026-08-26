@@ -251,6 +251,26 @@ jobs:
           )
           [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4 ]]
 
+      - name: Sign and verify release artifacts
+        shell: bash
+        env:
+          CI_KEY_PASSPHRASE: ${{ secrets.CI_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CI_KEY_PASSPHRASE" ]]
+          for suffix in img.zst raucb manifest.json sha256; do
+            artifact="dist/$VERSION.$suffix"
+            [[ -s "$artifact" ]]
+            printf '%s\n' "$CI_KEY_PASSPHRASE" | \
+              GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch --yes \
+                --pinentry-mode loopback --passphrase-fd 0 \
+                --local-user "$QBTOS_GPG_FINGERPRINT" \
+                --armor --detach-sign --output "$artifact.asc" "$artifact"
+            GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch \
+              --verify "$artifact.asc" "$artifact"
+          done
+          [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 8 ]]
+
       - name: Create moving feed document
         shell: bash
         run: |

@@ -19,11 +19,13 @@ command -v jq >/dev/null 2>&1 || die 'jq is required'
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "${script_dir}/.." && pwd)
 dist_dir="${repo_root}/dist"
+release_notes="${script_dir}/release-notes.md"
 api="${FORGEJO_SERVER_URL%/}/api/v1/repos/${FORGEJO_REPOSITORY}"
 authorization="Authorization: token ${FORGEJO_TOKEN}"
 temporary=$(mktemp -d)
 trap 'find "$temporary" -type f -delete; rmdir "$temporary"' EXIT HUP INT TERM
 response="${temporary}/response.json"
+managed_suffixes='img.zst img.zst.asc raucb raucb.asc manifest.json manifest.json.asc sha256 sha256.asc'
 
 phase() {
 	printf 'Forgejo: %s...\n' "$1"
@@ -52,12 +54,17 @@ api_write() {
 	fi
 }
 
-test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 4 || \
-	die 'dist must contain exactly four files'
-for suffix in img.zst raucb manifest.json sha256; do
+test -s "$release_notes" || die 'release notes are missing or empty'
+test "$(find "$dist_dir" -maxdepth 1 -type f | wc -l)" -eq 8 || \
+	die 'dist must contain exactly eight files'
+for suffix in $managed_suffixes; do
 	test -s "${dist_dir}/${VERSION}.${suffix}" || \
 		die "missing ${VERSION}.${suffix}"
 done
+jq -n --arg tag "$SOURCE_TAG" --arg name "$VERSION" --arg commit "$COMMIT" \
+	--rawfile body "$release_notes" \
+	'{tag_name:$tag,target_commitish:$commit,name:$name,body:$body,draft:false,prerelease:false}' \
+	> "${temporary}/release.json"
 
 phase "looking up release ${SOURCE_TAG}"
 status=$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
@@ -70,20 +77,9 @@ case "$status" in
 			"${api}/releases/${release_id}/assets"
 		asset_list="${temporary}/forgejo-assets.json"
 		cp "$response" "$asset_list"
-		for suffix in img.zst raucb manifest.json sha256; do
-			filename="${VERSION}.${suffix}"
-			for asset_id in $(jq -r --arg name "$filename" \
-				'.[] | select(.name == $name) | .id' "$asset_list"); do
-				api_write "removing existing Forgejo asset ${filename}" \
-					-X DELETE "${api}/releases/${release_id}/assets/${asset_id}"
-			done
-		done
 		;;
 	404)
 		phase "creating release ${SOURCE_TAG}"
-		jq -n --arg tag "$SOURCE_TAG" --arg name "$VERSION" --arg commit "$COMMIT" \
-			'{tag_name:$tag,target_commitish:$commit,name:$name,draft:false,prerelease:false}' \
-			> "${temporary}/release.json"
 		api_write 'creating Forgejo release' \
 			-X POST -H 'Content-Type: application/json' \
 			--data-binary "@${temporary}/release.json" "${api}/releases"
@@ -95,8 +91,25 @@ case "$status" in
 		;;
 esac
 
-phase 'uploading four release assets'
-for suffix in img.zst raucb manifest.json sha256; do
+phase 'updating release verification instructions'
+api_write 'updating Forgejo release metadata' \
+	-X PATCH -H 'Content-Type: application/json' \
+	--data-binary "@${temporary}/release.json" "${api}/releases/${release_id}"
+
+if test -n "${asset_list:-}"; then
+	phase 'removing existing managed assets'
+	for suffix in $managed_suffixes; do
+		filename="${VERSION}.${suffix}"
+		for asset_id in $(jq -r --arg name "$filename" \
+			'.[] | select(.name == $name) | .id' "$asset_list"); do
+			api_write "removing existing Forgejo asset ${filename}" \
+				-X DELETE "${api}/releases/${release_id}/assets/${asset_id}"
+		done
+	done
+fi
+
+phase 'uploading eight release assets'
+for suffix in $managed_suffixes; do
 	filename="${VERSION}.${suffix}"
 	api_write "uploading Forgejo asset ${filename}" \
 		-X POST -F "attachment=@${dist_dir}/${filename}" \

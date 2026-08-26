@@ -118,10 +118,12 @@ make release VERSION="$VERSION" BUILD_DATE="$BUILD_DATE" \
   QBTOS_GPG_KEYRING_FILE=/secure/release-public.gpg
 ```
 
-The release uses a fresh `output/release/` tree and writes exactly four public
-files under `dist/`. The normal Forgejo path additionally clear-signs and
-verifies `.sha256` with `CI_KEY`. See [UPDATES.md](UPDATES.md) for key handling,
-feed publication, and recovery.
+The release uses a fresh `output/release/` tree and writes four primary files
+under `dist/`. The normal Forgejo path additionally clear-signs `.sha256`,
+creates and verifies a detached armored `.asc` signature for every primary
+file using `CI_KEY`, and publishes all eight files. See
+[UPDATES.md](UPDATES.md) for key handling, verification, feed publication, and
+recovery.
 
 ## Updating configuration
 
