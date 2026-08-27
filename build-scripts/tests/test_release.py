@@ -407,7 +407,12 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("-p:PublishSingleFile=true", workflow)
         self.assertIn("PE32\\+?.*executable", workflow)
         self.assertIn('artifact="dist/$VERSION.imager-windows-x64.exe"', workflow)
-        self.assertIn('sha256sum "$artifact" >> "dist/$VERSION.sha256"', workflow)
+        self.assertIn('cd dist', workflow)
+        self.assertIn(
+            'sha256sum "$(basename "$artifact")" >> "$VERSION.sha256"',
+            workflow,
+        )
+        self.assertNotIn('sha256sum "$artifact" >> "dist/$VERSION.sha256"', workflow)
         self.assertIn(
             "uses: https://code.forgejo.org/forgejo/upload-artifact@v4",
             imager_job)

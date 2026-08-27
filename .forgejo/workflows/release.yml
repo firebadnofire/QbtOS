@@ -293,7 +293,10 @@ jobs:
           [[ -s "$source" ]]
           file "$source" | grep -Eq 'PE32\+?.*executable'
           install -m 0644 "$source" "$artifact"
-          sha256sum "$artifact" >> "dist/$VERSION.sha256"
+          (
+            cd dist
+            sha256sum "$(basename "$artifact")" >> "$VERSION.sha256"
+          )
           [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 5 ]]
 
       # Save after a completed build attempt, including a failed build, so
