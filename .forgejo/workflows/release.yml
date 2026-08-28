@@ -284,7 +284,7 @@ jobs:
           name: qbtos-imager-windows-x64
           path: output/imager-ui-download
 
-      - name: Add Windows imager to signed release artifacts
+      - name: Add Windows imager to release artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -293,10 +293,6 @@ jobs:
           [[ -s "$source" ]]
           file "$source" | grep -Eq 'PE32\+?.*executable'
           install -m 0644 "$source" "$artifact"
-          (
-            cd dist
-            sha256sum "$(basename "$artifact")" >> "$VERSION.sha256"
-          )
           [[ "$(find dist -maxdepth 1 -type f | wc -l)" -eq 5 ]]
 
       # Save after a completed build attempt, including a failed build, so
@@ -325,6 +321,15 @@ jobs:
           [[ -n "$CI_KEY_PASSPHRASE" ]]
           unsigned_checksums="$RUNNER_TEMP/$VERSION.sha256.unsigned"
           mv "dist/$VERSION.sha256" "$unsigned_checksums"
+          actual_checksum_names=$(awk '{print $2}' "$unsigned_checksums" | LC_ALL=C sort)
+          expected_checksum_names=$(printf '%s\n' \
+            "$VERSION.img.zst" \
+            "$VERSION.manifest.json" \
+            "$VERSION.raucb" | LC_ALL=C sort)
+          [[ "$actual_checksum_names" == "$expected_checksum_names" ]] || {
+            printf 'OTA checksum set must contain only image, bundle, and manifest artifacts\n' >&2
+            exit 1
+          }
           printf '%s\n' "$CI_KEY_PASSPHRASE" | \
             GNUPGHOME="$QBTOS_GNUPGHOME" gpg --batch --yes \
               --pinentry-mode loopback --passphrase-fd 0 \

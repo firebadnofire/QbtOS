@@ -356,6 +356,17 @@ class ForgejoWorkflowTests(unittest.TestCase):
 
         self.assertIn("--pinentry-mode loopback --passphrase-fd 0", workflow)
         self.assertIn("--armor --clearsign", workflow)
+        self.assertIn("actual_checksum_names=$(awk '{print $2}'", workflow)
+        self.assertIn(
+            '"$VERSION.img.zst" \\\n'
+            '            "$VERSION.manifest.json" \\\n'
+            '            "$VERSION.raucb"',
+            workflow,
+        )
+        self.assertIn(
+            "OTA checksum set must contain only image, bundle, and manifest artifacts",
+            workflow,
+        )
         self.assertIn('--verify "dist/$VERSION.sha256"', workflow)
         self.assertIn('gpg --batch --decrypt \\\n', workflow)
         self.assertIn('"$VERSION.sha256" | sha256sum -c -', workflow)
@@ -383,7 +394,7 @@ class ForgejoWorkflowTests(unittest.TestCase):
             workflow.index("Publish Forgejo release and moving feed"),
         )
 
-    def test_windows_imager_is_cross_compiled_on_ubuntu_and_checksummed(self):
+    def test_windows_imager_is_cross_compiled_and_separately_signed(self):
         workflow = FORGEJO_WORKFLOW.read_text(encoding="utf-8")
 
         imager_job = workflow[
@@ -407,12 +418,15 @@ class ForgejoWorkflowTests(unittest.TestCase):
         self.assertIn("-p:PublishSingleFile=true", workflow)
         self.assertIn("PE32\\+?.*executable", workflow)
         self.assertIn('artifact="dist/$VERSION.imager-windows-x64.exe"', workflow)
-        self.assertIn('cd dist', workflow)
-        self.assertIn(
+        self.assertNotIn(
             'sha256sum "$(basename "$artifact")" >> "$VERSION.sha256"',
             workflow,
         )
         self.assertNotIn('sha256sum "$artifact" >> "dist/$VERSION.sha256"', workflow)
+        self.assertIn(
+            "for suffix in img.zst raucb manifest.json sha256 imager-windows-x64.exe; do",
+            workflow,
+        )
         self.assertIn(
             "uses: https://code.forgejo.org/forgejo/upload-artifact@v4",
             imager_job)
