@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import ssl
+import stat
 import subprocess
 import tempfile
 import urllib.request
@@ -374,8 +375,14 @@ def bootloader_state(runner=subprocess.run):
 
 
 def _ignore_update_data(directory, names):
-    del directory
-    return {name for name in names if name == "updates"}
+    ignored = {name for name in names if name == "updates"}
+    for name in names:
+        if name in ignored:
+            continue
+        path = Path(directory) / name
+        if stat.S_ISSOCK(path.stat().st_mode):
+            ignored.add(name)
+    return ignored
 
 
 def _schema_of(root):

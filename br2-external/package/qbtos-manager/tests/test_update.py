@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import io
 import json
+import socket
 import sys
 import tempfile
 import types
@@ -188,6 +189,19 @@ class MigrationTests(unittest.TestCase):
         (root / "settings.json").write_text(
             json.dumps({"version": 1, "value": "original"}), encoding="utf-8")
         return root, Path(base) / "qbtos-state"
+
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "Unix sockets unavailable")
+    def test_state_copy_ignores_runtime_unix_sockets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            endpoint = runtime / "ipc-socket"
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                listener.bind(str(endpoint))
+                ignored = update._ignore_update_data(runtime, [endpoint.name])
+            finally:
+                listener.close()
+            self.assertEqual(ignored, {endpoint.name})
 
     def test_migration_failure_keeps_active_generation(self):
         with tempfile.TemporaryDirectory() as directory:
