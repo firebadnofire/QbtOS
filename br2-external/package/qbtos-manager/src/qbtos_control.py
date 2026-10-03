@@ -161,6 +161,7 @@ log file = /run/qbtos-samba/log.%m
 map to guest = Bad User
 max log size = 256
 multicast dns register = no
+ncalrpc dir = {SMB_RUNTIME}/ncalrpc
 ntlm auth = disabled
 pid directory = {SMB_RUNTIME}
 printcap name = /dev/null

@@ -61,6 +61,7 @@ class ServiceControlTests(unittest.TestCase):
             self.assertIn("server min protocol = SMB2_02", value)
             self.assertIn("smb ports = 445", value)
             self.assertIn("multicast dns register = no", value)
+            self.assertIn(f"ncalrpc dir = {runtime}/ncalrpc", value)
             self.assertNotIn("mdns name = disabled", value)
             self.assertIn(f"path = {downloads}", value)
 
