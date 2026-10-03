@@ -1,2 +1,4 @@
 # Locally calculated after Buildroot's locked Cargo vendoring post-process.
+# Buildroot 2026.05 uses cargo5; 2026.08 uses cargo6 for the same pinned commit.
 sha256  1a374d2c20e2f80bf2e2f2a8967d3b47f4f8478f6dbcafe8c05a0faeca85badd  argon40-rust-cbde9ecd2f03d74767f93e78107b2bd788d4bdab-git4-cargo5.tar.gz
+sha256  915ac2095a6972673dac33b25445ec141ed4667d7d410407d5b47a1454a7cb70  argon40-rust-cbde9ecd2f03d74767f93e78107b2bd788d4bdab-git4-cargo6.tar.gz

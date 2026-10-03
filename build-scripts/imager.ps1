@@ -516,8 +516,8 @@ function Get-ImagerDiskInventory {
 }
 
 function Get-DiskVolumeDescriptions([UInt32] $DiskNumber) {
-    $items = @(Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue | ForEach-Object {
-        $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
+    $items = @(Get-DiskPartitions $DiskNumber | ForEach-Object {
+        $volume = Get-AssociatedVolume $_
         if ($volume) {
             $mount = if ($volume.DriveLetter) { "$($volume.DriveLetter):" } else { '(no drive letter)' }
             "$mount $($volume.FileSystemLabel) $($volume.FileSystem)"
@@ -527,11 +527,33 @@ function Get-DiskVolumeDescriptions([UInt32] $DiskNumber) {
     return $items
 }
 
+function Get-DiskPartitions([UInt32] $DiskNumber) {
+    try {
+        return @(Get-Partition -DiskNumber $DiskNumber -ErrorAction Stop)
+    } catch {
+        if ($_.Exception.Message -like "No MSFT_Partition objects found with property 'DiskNumber' equal to '$DiskNumber'.*") {
+            return @()
+        }
+        throw
+    }
+}
+
+function Get-AssociatedVolume($Partition) {
+    try {
+        return $Partition | Get-Volume -ErrorAction Stop
+    } catch {
+        if ($_.Exception.Message -like 'No matching MSFT_Volume objects found by CIM query*') {
+            return $null
+        }
+        throw
+    }
+}
+
 function Lock-DiskVolumes([UInt32] $DiskNumber) {
     $handles = [Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
     try {
-        Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue | ForEach-Object {
-            $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
+        Get-DiskPartitions $DiskNumber | ForEach-Object {
+            $volume = Get-AssociatedVolume $_
             if ($volume -and $volume.Path) {
                 $nativePath = $volume.Path.TrimEnd('\').Replace('\\?\', '\\.\')
                 $lastError = $null

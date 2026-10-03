@@ -1,5 +1,41 @@
 # Development Image Validation
 
+## Weekly maintenance candidate (2026-10-02)
+
+The maintenance implementation was tested in a separate WSL Linux-filesystem
+mirror because the Windows checkout's existing CRLF shell scripts cannot be
+executed directly by Linux `make check`. The 20 local maintenance fixtures
+passed, including stable-tag selection, no-op, source-hash refresh, holds,
+failed validation, cleanup, remote-main race, and atomic publication to a
+disposable local Git remote. No real Forgejo branch or tag was pushed.
+
+For the Buildroot `2026.08` and qBittorrent `5.2.4` candidate, `make check`
+reported zero external-tree warnings, 71 manager tests passed, and 87
+build/release tests passed (nine skipped). ShellCheck passed. A fresh Raspberry
+Pi output tree completed `make build` after correcting three concrete upgrade
+issues and resuming that same tree: the Argon40 `cargo6` archive hash, the
+pinned U-Boot source/license hash in its global patch directory, and an old
+qBittorrent Qt header patch already incorporated upstream. The maintenance
+script handles the verified C++ defconfig migration and obsolete qBittorrent
+patch removal; mandatory download hashes remain enabled.
+
+The resulting `sdcard.img` is 807,403,520 bytes with SHA-256:
+
+```text
+ea020b5057f1bae88d4b297be94aec3578f139d9792cc675edab4951a0ffb788
+```
+
+Host inspection verified MBR disk signature `0x5142544f`, the 64 MiB boot
+partition, equal 96 MiB system A/B partitions, and the 512 MiB logical state
+partition. The image contains the 84 MiB SquashFS root, qBittorrent and RAUC
+executables, and the RAUC public keyring. Byte comparisons matched the
+embedded boot image, both SquashFS slots, and state filesystem to their source
+images. A target-tree scan found no
+private-key-shaped files or PEM private key blocks. This candidate has not
+been run on a hosted Forgejo runner or booted on Raspberry Pi hardware;
+signing, publication, OTA rollback, VPN protection, and torrent behavior for
+this candidate remain unverified on a device.
+
 ## Current development image (2026-08-11)
 
 The latest locally built Raspberry Pi artifact is

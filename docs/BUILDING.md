@@ -45,7 +45,11 @@ call the NTFS package `ntfs-3g`; Gentoo commonly provides it as
 
 ## Normal build
 
-Buildroot is pinned as a Git submodule at release `2026.05.1`.
+Buildroot is pinned as a Git submodule. Inspect its checked-out tag with
+`git -C buildroot describe --tags --exact-match HEAD` after initialization.
+The weekly maintenance workflow checks stable final Buildroot and qBittorrent
+releases and changes these pins only after a clean image build passes. See
+[UPDATES.md](UPDATES.md) for local preview, emergency holds, and publication.
 
 ```bash
 git submodule update --init --recursive

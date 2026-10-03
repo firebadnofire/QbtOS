@@ -31,7 +31,7 @@ unexport LD_LIBRARY_PATH
 unexport PKG_CONFIG_PATH
 
 .PHONY: all configure build image imager rebuild clean distclean menuconfig \
-	savedefconfig check legal-info release development-release release-version
+	savedefconfig check legal-info release development-release release-version maintenance
 
 all: build
 
@@ -70,6 +70,11 @@ check:
 
 release-version:
 	@"$(CURDIR)/build-scripts/release-version.sh"
+
+maintenance:
+	@test -z "$(PUBLISH)" || test "$(PUBLISH)" = 1 || { \
+		echo 'PUBLISH must be 1 when set' >&2; exit 2; }
+	sh "$(CURDIR)/build-scripts/maintenance-release.sh" $(if $(filter 1,$(PUBLISH)),--publish,)
 
 release:
 	VERSION="$(VERSION)" BUILD_DATE="$(BUILD_DATE)" REVISION="$(REVISION)" \

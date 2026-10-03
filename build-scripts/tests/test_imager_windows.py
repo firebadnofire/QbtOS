@@ -132,6 +132,32 @@ class WindowsImagerTests(unittest.TestCase):
         self.assertIsNone(choice["Path"])
 
     @unittest.skipUnless(POWERSHELL, "PowerShell is required")
+    def test_partition_without_windows_volume_is_skipped_but_other_errors_surface(self):
+        command = (
+            f"trap {{ Write-Output ('FAIL: ' + $_.Exception.Message); exit 2 }}; . '{IMAGER}' -NoRun; "
+            "function Get-Partition { [pscustomobject]@{ Number = 5 } }; "
+            "function Get-Volume { throw 'No matching MSFT_Volume objects found by CIM query for MSFT_Partition' }; "
+            "if ((Get-DiskVolumeDescriptions 2) -ne 'none') { throw 'Expected no Windows volume' }; "
+            "if (@(Lock-DiskVolumes 2).Count -ne 0) { throw 'Expected no volume locks' }; "
+            "function Get-Partition { throw \"No MSFT_Partition objects found with property 'DiskNumber' equal to '2'. Verify the value.\" }; "
+            "if ((Get-DiskVolumeDescriptions 2) -ne 'none') { throw 'Expected no partitions' }; "
+            "if (@(Lock-DiskVolumes 2).Count -ne 0) { throw 'Expected no locks on empty disk' }; "
+            "function Get-Partition { throw 'Storage service unavailable' }; "
+            "try { Get-DiskVolumeDescriptions 2 | Out-Null; throw 'Unexpected success' } "
+            "catch { if ($_.Exception.Message -ne 'Storage service unavailable') { throw } }; "
+            "function Get-Partition { [pscustomobject]@{ Number = 5 } }; "
+            "function Get-Volume { throw 'Storage service unavailable' }; "
+            "try { Get-DiskVolumeDescriptions 2 | Out-Null; throw 'Unexpected success' } "
+            "catch { if ($_.Exception.Message -ne 'Storage service unavailable') { throw } }; exit 0"
+        )
+        result = subprocess.run(
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(POWERSHELL, "PowerShell is required")
     def test_adds_ntfs_logical_partition_without_replacing_base_layout(self):
         with tempfile.TemporaryDirectory() as temporary:
             disk = Path(temporary) / "disk.img"

@@ -53,6 +53,13 @@ Routine builds use the checked-in defconfig and do not require `menuconfig`.
 Use `make rebuild` for a clean target rebuild or `make distclean` followed by
 the two build commands for a completely fresh output tree.
 
+The default-branch Forgejo maintenance workflow checks stable Buildroot and
+qBittorrent releases each Sunday at 09:17 UTC. It validates unreleased source
+with `make check` and a fresh Raspberry Pi image build before creating the next
+`revision-N` tag. If nothing changed, it exits without a release. Preview the
+same path locally with `make maintenance`; see [signed updates](docs/UPDATES.md)
+for publishing, holds, and the required Git write token.
+
 ## Write the SD card
 
 The recommended writer is the repository's interactive terminal imager:

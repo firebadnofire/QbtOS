@@ -28,8 +28,8 @@ internal sealed class MainForm : Form
     {
         this.backendPath = backendPath;
         Text = "qbtOS Imager";
-        MinimumSize = new Size(760, 680);
-        Size = new Size(860, 760);
+        MinimumSize = new Size(640, 520);
+        Size = new Size(740, 620);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         AllowDrop = true;
@@ -51,6 +51,7 @@ internal sealed class MainForm : Form
         DragEnter += ImageDragEnter;
         DragDrop += ImageDragDrop;
         Shown += async (_, _) => await RefreshDisksAsync();
+        Load += (_, _) => FitToWorkingArea();
         FormClosing += PreventCloseDuringWrite;
         UpdateDataControls();
     }
@@ -121,15 +122,27 @@ internal sealed class MainForm : Form
     private GroupBox BuildDataGroup()
     {
         var group = NewGroup("3. Data storage");
-        var layout = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-        layout.Controls.Add(createData);
-        layout.Controls.Add(maximumData);
-        layout.Controls.Add(new Label { Text = "Size (GiB):", AutoSize = true, Margin = new Padding(14, 7, 3, 0) });
-        layout.Controls.Add(dataSize);
-        layout.Controls.Add(new Label { Text = "Filesystem:", AutoSize = true, Margin = new Padding(14, 7, 3, 0) });
-        layout.Controls.Add(fileSystem);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, AutoSize = true };
+        var options = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
+        options.Controls.Add(createData);
+        options.Controls.Add(maximumData);
+        var details = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
+        details.Controls.Add(new Label { Text = "Size (GiB):", AutoSize = true, Margin = new Padding(3, 7, 3, 0) });
+        details.Controls.Add(dataSize);
+        details.Controls.Add(new Label { Text = "Filesystem:", AutoSize = true, Margin = new Padding(14, 7, 3, 0) });
+        details.Controls.Add(fileSystem);
+        layout.Controls.Add(options, 0, 0);
+        layout.Controls.Add(details, 0, 1);
         group.Controls.Add(layout);
         return group;
+    }
+
+    private void FitToWorkingArea()
+    {
+        var area = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, area.Width), Math.Min(MinimumSize.Height, area.Height));
+        Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+        Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
     }
 
     private GroupBox BuildStatusGroup()

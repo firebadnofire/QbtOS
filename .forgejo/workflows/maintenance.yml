@@ -1,0 +1,129 @@
+name: Weekly validated maintenance
+
+on:
+  schedule:
+    - cron: "17 9 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: qbtos-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: [ubuntu-latest]
+    container: node:22-bookworm
+    timeout-minutes: 360
+    env:
+      JOBS: 4
+    steps:
+      - name: Check trusted default branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${FORGEJO_REF:-${GITHUB_REF:-}}"
+          event="${FORGEJO_EVENT_NAME:-${GITHUB_EVENT_NAME:-}}"
+          test "$ref" = refs/heads/main
+          test "$event" = schedule || test "$event" = workflow_dispatch
+
+      - name: Check out main and pinned submodules
+        uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -eq 0
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -qq update
+          apt-get -qq install -y --no-install-recommends \
+            bc build-essential ca-certificates cpio curl file flake8 git \
+            gnupg jq libncurses-dev libssl-dev mtools patch perl python3 python3-magic \
+            qemu-utils rsync shellcheck squashfs-tools fdisk unzip util-linux wget \
+            xz-utils zstd
+          install -d -m 0755 .ci-cache/buildroot-dl .ci-cache/buildroot-ccache
+
+      - name: Restore Buildroot downloads
+        id: buildroot-download-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-cache/buildroot-dl
+          key: qbtos-maintenance-dl-${{ runner.os }}-${{ runner.arch }}-${{ forgejo.sha }}
+          restore-keys: |
+            qbtos-maintenance-dl-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Restore compiler cache
+        id: buildroot-compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-cache/buildroot-ccache
+          key: qbtos-maintenance-ccache-${{ runner.os }}-${{ runner.arch }}-${{ forgejo.sha }}
+          restore-keys: |
+            qbtos-maintenance-ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Validate and publish next revision
+        id: maintenance
+        shell: bash
+        env:
+          QBTOS_MAINTENANCE_TOKEN: ${{ secrets.QBTOS_MAINTENANCE_TOKEN }}
+          QBTOS_MAINTENANCE_USERNAME: ${{ vars.QBTOS_MAINTENANCE_USERNAME }}
+        run: |
+          set -euo pipefail
+          test -n "$QBTOS_MAINTENANCE_TOKEN" || {
+            echo 'QBTOS_MAINTENANCE_TOKEN is required for a release-capable run' >&2
+            exit 1
+          }
+          test -n "$QBTOS_MAINTENANCE_USERNAME" || {
+            echo 'QBTOS_MAINTENANCE_USERNAME repository variable is required' >&2
+            exit 1
+          }
+          case "$QBTOS_MAINTENANCE_USERNAME" in
+            *[!A-Za-z0-9_.-]*)
+              echo 'QBTOS_MAINTENANCE_USERNAME contains invalid characters' >&2
+              exit 1 ;;
+          esac
+          test "$(id -u)" -eq 0
+          git remote set-url origin "${FORGEJO_SERVER_URL%/}/${FORGEJO_REPOSITORY}.git"
+          chown -R node:node "$PWD" "$RUNNER_TEMP"
+          askpass="$RUNNER_TEMP/qbtos-maintenance-askpass"
+          cat > "$askpass" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' "$QBTOS_MAINTENANCE_USERNAME" ;;
+            *Password*) printf '%s\n' "$QBTOS_MAINTENANCE_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          EOF
+          chmod 0700 "$askpass"
+          chown node:node "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
+          export BR2_DL_DIR="$PWD/.ci-cache/buildroot-dl"
+          export BR2_CCACHE_DIR="$PWD/.ci-cache/buildroot-ccache"
+          runuser -u node -- git config user.name 'qbtOS maintenance'
+          runuser -u node -- git config user.email 'maintenance@qbtos.invalid'
+          runuser -u node -- sh ./build-scripts/maintenance-release.sh --publish
+          rm -f -- "$askpass"
+
+      - name: Save Buildroot downloads
+        if: always() && (steps.maintenance.outcome == 'success' || steps.maintenance.outcome == 'failure') && steps.buildroot-download-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-cache/buildroot-dl
+          key: qbtos-maintenance-dl-${{ runner.os }}-${{ runner.arch }}-${{ forgejo.sha }}
+
+      - name: Save compiler cache
+        if: always() && (steps.maintenance.outcome == 'success' || steps.maintenance.outcome == 'failure') && steps.buildroot-compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-cache/buildroot-ccache
+          key: qbtos-maintenance-ccache-${{ runner.os }}-${{ runner.arch }}-${{ forgejo.sha }}
+
+      - name: Remove Git credential helper
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/qbtos-maintenance-askpass"

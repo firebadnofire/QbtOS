@@ -29,10 +29,15 @@ milestone.
 
 ## Versions and release builds
 
-Create and push exact annotated or lightweight tags named `revision-N`, where
-`N` is a positive integer without leading zeroes. The numerically greatest tag
-reachable from `HEAD` supplies the revision; the New York build date supplies
-the date:
+The weekly maintenance workflow checks final Buildroot and qBittorrent releases,
+validates a clean Raspberry Pi image when source is unreleased, and normally
+creates the next exact `revision-N` tag. A timer with no upstream change and no
+unreleased main commit does nothing. Failed validation creates no remote commit,
+tag, release, or feed update. `N` is positive without leading zeroes. The
+greatest revision tag reachable from `main` determines whether source is
+unreleased; the next number follows the greatest valid fetched revision tag.
+The New York build date supplies the date. Manual tags remain possible for
+recovery:
 
 ```sh
 git tag revision-2
@@ -43,6 +48,51 @@ eval "$(./build-scripts/release-version.sh)"
 Malformed or misspelled reachable revision tags make the release fail. Every
 `revision-N` push starts `.forgejo/workflows/release.yml`; the job independently
 validates the exact tag before building.
+
+The scheduled workflow is `.forgejo/workflows/maintenance.yml`. Its default
+schedule is `17 9 * * 0` (Sundays at 09:17 UTC); edit that cron expression to
+change the schedule. Forgejo runs schedules only from the repository default
+branch. Disable the maintenance workflow in Forgejo Actions to pause automatic
+maintenance. Hardware acceptance remains a separate human validation gate.
+
+Run the same maintenance logic locally from a clean, up-to-date `main` checkout
+with `make maintenance`. It fetches stable upstream tags, applies candidates,
+runs `make check` and a fresh image build, and leaves validated source changes
+for review without pushing. `make maintenance PUBLISH=1` or
+`build-scripts/maintenance-release.sh --publish` additionally creates one
+maintenance commit if dependencies changed, tags the validated commit, and
+atomically pushes the branch and tag. Use publish mode only in a trusted
+checkout with permission to write to `main`.
+
+`build-scripts/maintenance.conf` provides optional exact `BUILDROOT_HOLD` and
+`QBITTORRENT_HOLD` values for an emergency regression. Empty values track the
+newest stable final release. Commit a hold to `main`; the summary shows active
+holds. Holds cannot downgrade an already pinned release. The maintenance script
+never advances the Argon40 submodule or other pinned third-party components.
+For Buildroot 2026.08, the script removes the obsolete external-toolchain C++
+setting only when generated configuration confirms libstdc++ remains selected.
+The unchanged Argon40 source has separate SHA-256 hashes for Buildroot's
+`cargo5` and `cargo6` vendored archive formats; source hash checks stay enabled.
+The qbtOS U-Boot patch directory also carries the pinned U-Boot source and
+license hashes required by Buildroot's forced hash checking.
+When a new qBittorrent archive already includes both Qt container headers,
+maintenance removes the obsolete qbtOS compatibility patch before building.
+
+The scheduled job requires a dedicated `QBTOS_MAINTENANCE_TOKEN` repository
+secret with repository contents write permission for `main` and tag creation,
+plus a non-secret `QBTOS_MAINTENANCE_USERNAME` repository variable set to the
+token owner's Forgejo username. That account must be allowed by branch and tag
+protection rules. The token is used only for Git authentication after trusted
+default-branch checkout. Do not reuse RAUC, OpenPGP, VPN, or release-publishing
+credentials. The checkout disables persisted credentials, and the token is
+supplied through a temporary Git askpass helper. The job does not run for pull
+requests or forks. Ensure the
+Forgejo runner has the existing `ubuntu-latest` label and enough resources for
+one clean Raspberry Pi cross-build. The token is present in the maintenance
+job's environment during validation, so run this workflow only on an isolated,
+trusted runner and keep the token scoped to this repository. The signed release
+workflow still owns
+RAUC and OpenPGP signing, publication, and the moving feed.
 
 RAUC uses CMS/X.509 signatures. The public hierarchy in `ca/` is built into the
 image: `root-ca.pem` is the immutable RAUC trust anchor,
